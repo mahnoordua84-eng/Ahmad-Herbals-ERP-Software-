@@ -1,0 +1,6 @@
+{
+  "name": "Ahmad Herbals ERP & Management System",
+  "description": "Enterprise-grade ERP and business management platform for herbs, grains, inventory, multi-warehouse, POS, finance, and multi-channel operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

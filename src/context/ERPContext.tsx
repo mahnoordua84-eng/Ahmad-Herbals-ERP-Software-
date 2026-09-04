@@ -76,6 +76,7 @@ interface ERPContextType {
   stockMovements: StockMovement[];
   suppliers: Supplier[];
   supplierLedger: SupplierLedgerEntry[];
+  purchases: Purchase[];
   customers: Customer[];
   customerLedger: CustomerLedgerEntry[];
   orders: Order[];
@@ -1347,6 +1348,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         stockMovements,
         suppliers,
         supplierLedger,
+        purchases,
         customers,
         customerLedger,
         orders,

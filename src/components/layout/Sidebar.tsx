@@ -2,36 +2,41 @@ import React from 'react';
 import { useERP } from '../../context/ERPContext';
 import {
   LayoutDashboard,
-  Store,
   ShoppingCart,
-  Receipt,
-  Truck,
-  RotateCcw,
-  Package,
-  Layers,
-  Award,
-  Boxes,
-  Warehouse as WarehouseIcon,
-  ShoppingBag,
-  Users2,
+  ClipboardList,
+  Monitor,
   Users,
+  Package,
+  Tags,
+  Building2,
+  Boxes,
+  Warehouse,
+  ArrowLeftRight,
+  TriangleAlert,
+  ShoppingBag,
+  Truck,
+  Receipt,
   CreditCard,
-  ReceiptText,
-  PieChart,
-  Tag,
+  Wallet,
+  BookOpen,
+  ChartNoAxesCombined,
+  MapPin,
+  Ticket,
+  Megaphone,
+  Star,
+  UserRoundCog,
+  ShieldCheck,
   BarChart3,
-  UserCheck,
-  ShieldAlert,
-  History,
-  Bell,
+  ChartPie,
   Globe,
-  Image as ImageIcon,
+  Images,
+  FileText,
+  Bell,
+  History,
   DatabaseBackup,
   Settings,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
-  ExternalLink,
 } from 'lucide-react';
 import { ModuleName } from '../../types/erp';
 
@@ -73,60 +78,98 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navigationGroups: NavGroup[] = [
     {
-      title: 'Executive',
+      title: 'MAIN',
       items: [
-        { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard },
-        { id: 'reports', label: t('reports'), icon: BarChart3 },
+        { id: 'dashboard', label: t('dashboard') || 'Dashboard', icon: LayoutDashboard },
       ],
     },
     {
-      title: 'Operations',
+      title: 'SALES',
       items: [
-        { id: 'pos', label: t('pos'), icon: Store, badge: 'HOT' },
-        { id: 'orders', label: t('orders'), icon: ShoppingCart, badge: unreadOrderCount > 0 ? `${unreadOrderCount}` : undefined },
-        { id: 'invoices', label: t('invoices'), icon: Receipt },
-        { id: 'delivery', label: t('delivery'), icon: Truck },
-        { id: 'returns', label: t('returns'), icon: RotateCcw },
+        { id: 'sales', label: t('sales') || 'Sales', icon: ShoppingCart },
+        { id: 'orders', label: t('orders') || 'Orders', icon: ClipboardList, badge: unreadOrderCount > 0 ? `${unreadOrderCount}` : undefined },
+        { id: 'pos', label: t('pos') || 'POS', icon: Monitor, badge: 'HOT' },
+        { id: 'customers', label: t('customers') || 'Customers', icon: Users },
       ],
     },
     {
-      title: 'Catalog & Inventory',
+      title: 'PRODUCTS',
       items: [
-        { id: 'products', label: t('products'), icon: Package },
-        { id: 'categories', label: t('categories'), icon: Layers },
-        { id: 'brands', label: t('brands'), icon: Award },
-        { id: 'inventory', label: t('inventory'), icon: Boxes, badge: unreadStockCount > 0 ? 'ALERT' : undefined },
-        { id: 'warehouses', label: t('warehouses'), icon: WarehouseIcon },
-        { id: 'purchases', label: t('purchases'), icon: ShoppingBag },
-        { id: 'suppliers', label: t('suppliers'), icon: Users2 },
+        { id: 'products', label: t('products') || 'Products', icon: Package },
+        { id: 'categories', label: t('categories') || 'Categories', icon: Tags },
+        { id: 'brands', label: t('brands') || 'Brands', icon: Building2 },
       ],
     },
     {
-      title: 'Finance & CRM',
+      title: 'INVENTORY',
       items: [
-        { id: 'customers', label: t('customers'), icon: Users },
-        { id: 'payments', label: t('payments'), icon: CreditCard },
-        { id: 'expenses', label: t('expenses'), icon: ReceiptText },
-        { id: 'accounting', label: t('accounting'), icon: PieChart },
-        { id: 'coupons', label: t('coupons'), icon: Tag },
+        { id: 'inventory', label: t('inventory') || 'Inventory', icon: Boxes, badge: unreadStockCount > 0 ? 'ALERT' : undefined },
+        { id: 'warehouses', label: t('warehouses') || 'Warehouses', icon: Warehouse },
+        { id: 'stock_transfers', label: 'Stock Transfers', icon: ArrowLeftRight },
+        { id: 'low_stock', label: 'Low Stock', icon: TriangleAlert, badge: 'ALERT' },
       ],
     },
     {
-      title: 'Online & Website',
+      title: 'PURCHASE',
       items: [
-        { id: 'website', label: t('website'), icon: Globe },
-        { id: 'media', label: t('media'), icon: ImageIcon },
+        { id: 'purchases', label: t('purchases') || 'Purchases', icon: ShoppingBag },
+        { id: 'suppliers', label: t('suppliers') || 'Suppliers', icon: Truck },
       ],
     },
     {
-      title: 'Administration',
+      title: 'FINANCE',
       items: [
-        { id: 'employees', label: t('employees'), icon: UserCheck },
-        { id: 'roles', label: t('roles'), icon: ShieldAlert },
-        { id: 'audit', label: t('audit'), icon: History },
-        { id: 'notifications', label: t('notifications'), icon: Bell },
-        { id: 'backup', label: t('backup'), icon: DatabaseBackup },
-        { id: 'settings', label: t('settings'), icon: Settings },
+        { id: 'invoices', label: t('invoices') || 'Invoices', icon: Receipt },
+        { id: 'payments', label: t('payments') || 'Payments', icon: CreditCard },
+        { id: 'expenses', label: t('expenses') || 'Expenses', icon: Wallet },
+        { id: 'accounting', label: t('accounting') || 'Accounting', icon: BookOpen },
+        { id: 'profit_loss', label: 'Profit & Loss', icon: ChartNoAxesCombined },
+      ],
+    },
+    {
+      title: 'DELIVERY',
+      items: [
+        { id: 'delivery', label: t('delivery') || 'Delivery', icon: Truck },
+        { id: 'tracking', label: 'Tracking', icon: MapPin },
+      ],
+    },
+    {
+      title: 'MARKETING',
+      items: [
+        { id: 'coupons', label: t('coupons') || 'Coupons', icon: Ticket },
+        { id: 'marketing', label: 'Marketing', icon: Megaphone },
+        { id: 'reviews', label: 'Reviews', icon: Star },
+      ],
+    },
+    {
+      title: 'PEOPLE',
+      items: [
+        { id: 'employees', label: t('employees') || 'Employees', icon: UserRoundCog },
+        { id: 'roles', label: t('roles') || 'Roles & Permissions', icon: ShieldCheck },
+      ],
+    },
+    {
+      title: 'REPORTS',
+      items: [
+        { id: 'reports', label: t('reports') || 'Reports', icon: BarChart3 },
+        { id: 'analytics', label: 'Analytics', icon: ChartPie },
+      ],
+    },
+    {
+      title: 'WEBSITE',
+      items: [
+        { id: 'website', label: t('website') || 'Website', icon: Globe },
+        { id: 'media', label: t('media') || 'Media Library', icon: Images },
+        { id: 'pages', label: 'Pages', icon: FileText },
+      ],
+    },
+    {
+      title: 'SYSTEM',
+      items: [
+        { id: 'notifications', label: t('notifications') || 'Notifications', icon: Bell },
+        { id: 'audit', label: t('audit') || 'Audit Logs', icon: History },
+        { id: 'backup', label: t('backup') || 'Backup', icon: DatabaseBackup },
+        { id: 'settings', label: t('settings') || 'Settings', icon: Settings },
       ],
     },
   ];
@@ -177,16 +220,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Items */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5 scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
           {navigationGroups.map((group) => {
-            // Filter items by permission
-            const visibleItems = group.items.filter((item) => hasPermission(item.id, 'view'));
+            // Filter items by permission (if user is Super Admin or has permission)
+            const visibleItems = group.items.filter((item) => {
+              if (currentRole === 'Super Admin') return true;
+              return hasPermission(item.id, 'view');
+            });
             if (visibleItems.length === 0) return null;
 
             return (
               <div key={group.title} className="space-y-1">
                 {!isCollapsed && (
-                  <div className="px-3 pb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  <div className="px-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                     {group.title}
                   </div>
                 )}
@@ -199,24 +245,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       key={item.id}
                       id={`nav-${item.id}`}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         onSelectModule(item.id);
                         if (isMobileOpen) onCloseMobile();
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectModule(item.id);
+                          if (isMobileOpen) onCloseMobile();
+                        }
+                      }}
                       title={isCollapsed ? item.label : undefined}
                       className={`group flex w-full items-center gap-3 px-3 py-2 text-xs font-medium transition-all cursor-pointer rounded-md ${
                         isActive
-                          ? 'bg-emerald-500/10 text-emerald-400 border-r-2 border-emerald-500 font-semibold'
-                          : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-r-2 border-emerald-500 font-semibold shadow-xs'
+                          : 'text-slate-400 hover:bg-slate-800/80 hover:text-white'
                       } ${isCollapsed ? 'justify-center px-2' : ''}`}
                     >
                       <Icon
-                        className={`h-4 w-4 shrink-0 transition-transform group-hover:scale-105 ${
+                        size={21}
+                        strokeWidth={1.8}
+                        className={`shrink-0 transition-transform duration-150 group-hover:scale-105 ${
                           isActive ? 'text-emerald-400' : 'text-slate-400 group-hover:text-white'
                         }`}
                       />
                       {!isCollapsed && (
-                        <span className="truncate flex-1 text-left">{item.label}</span>
+                        <span className="truncate flex-1 text-left font-medium tracking-tight">
+                          {item.label}
+                        </span>
                       )}
                       {!isCollapsed && item.badge && (
                         <span
@@ -243,17 +302,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-3 border-t border-slate-800 bg-[#0F172A]">
           {!isCollapsed ? (
             <div className="flex items-center p-2 bg-slate-800/50 rounded-lg border border-slate-800/80">
-              <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+              <div className="w-8 h-8 rounded-full bg-emerald-600/30 border border-emerald-500/40 flex items-center justify-center text-xs font-bold text-emerald-400 shrink-0">
                 {currentRole?.substring(0, 2).toUpperCase() || 'SA'}
               </div>
               <div className="ml-3 overflow-hidden text-ellipsis whitespace-nowrap min-w-0 flex-1">
-                <p className="text-xs font-medium text-white truncate">{currentRole || 'Super Admin'}</p>
+                <p className="text-xs font-semibold text-white truncate">{currentRole || 'Super Admin'}</p>
                 <p className="text-[10px] text-slate-500 truncate">{brandSettings.businessName}</p>
               </div>
             </div>
           ) : (
             <div className="flex justify-center">
-              <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-xs font-bold text-white" title={currentRole}>
+              <div
+                className="w-8 h-8 rounded-full bg-emerald-600/30 border border-emerald-500/40 flex items-center justify-center text-xs font-bold text-emerald-400"
+                title={currentRole}
+              >
                 {currentRole?.substring(0, 2).toUpperCase() || 'SA'}
               </div>
             </div>

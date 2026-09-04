@@ -23,6 +23,7 @@ import { EmployeesView } from './components/admin/EmployeesView';
 import { AuditLogsView } from './components/admin/AuditLogsView';
 import { MarketingView } from './components/marketing/MarketingView';
 import { SettingsView } from './components/settings/SettingsView';
+import { ReportsView } from './components/finance/ReportsView';
 
 import { ModuleName } from './types/erp';
 import { ShieldAlert } from 'lucide-react';
@@ -80,7 +81,17 @@ const ERPMainContent: React.FC = () => {
 
     switch (activeModule) {
       case 'dashboard':
-        return <DashboardView />;
+        return <DashboardView onNavigate={(m) => setActiveModule(m)} />;
+      case 'sales':
+      case 'orders':
+      case 'delivery':
+      case 'tracking':
+      case 'returns':
+        return <SalesOrdersView />;
+      case 'pos':
+        return <POSView />;
+      case 'customers':
+        return <CustomersView />;
       case 'products':
         return <ProductsView />;
       case 'categories':
@@ -88,35 +99,35 @@ const ERPMainContent: React.FC = () => {
       case 'brands':
         return <BrandsView />;
       case 'inventory':
+      case 'low_stock':
         return <InventoryView />;
       case 'warehouses':
+      case 'stock_transfers':
         return <WarehousesView />;
       case 'purchases':
         return <PurchasesView />;
       case 'suppliers':
         return <SuppliersView />;
-      case 'pos':
-        return <POSView />;
-      case 'orders':
-      case 'delivery':
-      case 'returns':
-        return <SalesOrdersView />;
       case 'invoices':
         return <InvoicesView />;
-      case 'customers':
-        return <CustomersView />;
+      case 'payments':
+      case 'accounting':
+      case 'profit_loss':
+        return <AccountingView />;
       case 'expenses':
         return <ExpensesView />;
-      case 'accounting':
-      case 'reports':
-      case 'payments':
-        return <AccountingView />;
       case 'employees':
       case 'roles':
         return <EmployeesView />;
+      case 'reports':
+      case 'analytics':
+        return <ReportsView />;
       case 'coupons':
+      case 'marketing':
+      case 'reviews':
       case 'website':
       case 'media':
+      case 'pages':
         return <MarketingView />;
       case 'audit':
       case 'notifications':
@@ -125,7 +136,7 @@ const ERPMainContent: React.FC = () => {
       case 'backup':
         return <SettingsView />;
       default:
-        return <DashboardView />;
+        return <DashboardView onNavigate={(m) => setActiveModule(m)} />;
     }
   };
 

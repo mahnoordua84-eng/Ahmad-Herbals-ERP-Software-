@@ -48,6 +48,8 @@ export type ModuleName =
   | 'brands'
   | 'inventory'
   | 'warehouses'
+  | 'stock_transfers'
+  | 'low_stock'
   | 'purchases'
   | 'suppliers'
   | 'sales'
@@ -58,23 +60,29 @@ export type ModuleName =
   | 'payments'
   | 'expenses'
   | 'accounting'
+  | 'profit_loss'
   | 'reports'
+  | 'analytics'
   | 'employees'
   | 'roles'
   | 'audit'
   | 'notifications'
   | 'website'
   | 'media'
+  | 'pages'
   | 'coupons'
+  | 'marketing'
+  | 'reviews'
   | 'returns'
   | 'delivery'
+  | 'tracking'
   | 'backup'
   | 'settings';
 
 export interface RolePermissions {
   role: RoleType;
   description: string;
-  permissions: Record<ModuleName, PermissionAction[]>;
+  permissions: Partial<Record<ModuleName, PermissionAction[]>>;
 }
 
 export interface BrandSettings {

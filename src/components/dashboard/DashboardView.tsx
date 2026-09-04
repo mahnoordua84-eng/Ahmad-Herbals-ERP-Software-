@@ -6,11 +6,13 @@ import {
   DollarSign,
   ShoppingCart,
   Clock,
+  Clock3,
   CheckCircle2,
   XCircle,
   Users,
   Package,
   AlertTriangle,
+  TriangleAlert,
   Receipt,
   Wallet,
   Calendar,
@@ -20,6 +22,8 @@ import {
   Store,
   RotateCcw,
   Boxes,
+  Banknote,
+  ShoppingBag,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -55,14 +59,14 @@ type PeriodOption =
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const {
     brandSettings,
-    orders,
-    products,
-    customers,
-    expenses,
-    purchases,
-    paymentRecords,
-    auditLogs,
-    stockMovements,
+    orders = [],
+    products = [],
+    customers = [],
+    expenses = [],
+    purchases = [],
+    paymentRecords = [],
+    auditLogs = [],
+    stockMovements = [],
     formatCurrency,
     t,
   } = useERP();
@@ -73,34 +77,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
   // Business Overview KPIs calculations
   const totalSales = useMemo(() => {
-    return orders.reduce((sum, o) => sum + (o.total || 0), 0);
+    return (orders || []).reduce((sum, o) => sum + (o.total || 0), 0);
   }, [orders]);
 
   const todaySales = useMemo(() => {
     const todayStr = '2026-09-04'; // Matches mock system time
-    return orders
-      .filter((o) => o.createdAt.startsWith(todayStr))
-      .reduce((sum, o) => sum + o.total, 0);
+    return (orders || [])
+      .filter((o) => o.createdAt?.startsWith(todayStr))
+      .reduce((sum, o) => sum + (o.total || 0), 0);
   }, [orders]);
 
   const monthlySales = useMemo(() => {
-    return orders
-      .filter((o) => o.createdAt.includes('2026-09') || o.createdAt.includes('2026-08'))
-      .reduce((sum, o) => sum + o.total, 0);
+    return (orders || [])
+      .filter((o) => o.createdAt?.includes('2026-09') || o.createdAt?.includes('2026-08'))
+      .reduce((sum, o) => sum + (o.total || 0), 0);
   }, [orders]);
 
-  const totalOrders = orders.length;
-  const pendingOrders = orders.filter((o) => o.orderStatus === 'PENDING' || o.orderStatus === 'PROCESSING').length;
-  const completedOrders = orders.filter((o) => o.orderStatus === 'DELIVERED').length;
-  const cancelledOrders = orders.filter((o) => o.orderStatus === 'CANCELLED').length;
+  const totalOrders = (orders || []).length;
+  const pendingOrders = (orders || []).filter((o) => o.orderStatus === 'PENDING' || o.orderStatus === 'PROCESSING').length;
+  const completedOrders = (orders || []).filter((o) => o.orderStatus === 'DELIVERED').length;
+  const cancelledOrders = (orders || []).filter((o) => o.orderStatus === 'CANCELLED').length;
 
-  const totalCustomers = customers.length;
-  const totalProducts = products.length;
-  const lowStockProducts = products.filter((p) => p.stock > 0 && p.stock <= p.minStock).length;
-  const outOfStockProducts = products.filter((p) => p.stock <= 0).length;
+  const totalCustomers = (customers || []).length;
+  const totalProducts = (products || []).length;
+  const lowStockProducts = (products || []).filter((p) => (p.stock || 0) > 0 && (p.stock || 0) <= (p.minStock || 0)).length;
+  const outOfStockProducts = (products || []).filter((p) => (p.stock || 0) <= 0).length;
 
   const totalExpenses = useMemo(() => {
-    return expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    return (expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0);
   }, [expenses]);
 
   // COGS and Profit calculations (Requirement #20)
@@ -109,8 +113,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   // Gross Profit - Expenses = Net Profit
   const { cogs, grossProfit, netProfit } = useMemo(() => {
     let calculatedCOGS = 0;
-    orders.forEach((o) => {
-      o.items.forEach((item) => {
+    (orders || []).forEach((o) => {
+      (o.items || []).forEach((item) => {
         calculatedCOGS += (item.purchasePrice || item.price * 0.65) * item.quantity;
       });
     });
@@ -233,163 +237,228 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* Executive KPI Grid (Professional Polish Design) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        {/* Total Sales / Revenue */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Total Revenue
-            </span>
+      {/* Executive KPI Grid - 10 Professional Cards with Dedicated Icons (Requirement #3) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+        {/* 1. Total Sales -> Icon: Banknote */}
+        <div
+          onClick={() => onNavigate('orders')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-emerald-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
+              <Banknote className="h-5 w-5" strokeWidth={2} />
+            </div>
             <span className="text-emerald-600 bg-emerald-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-emerald-950/50 dark:text-emerald-400">
-              +12.5%
+              ↑ 12.5%
             </span>
           </div>
-          <div className="text-2xl font-bold text-slate-900 dark:text-white">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Total Sales
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
             {formatCurrency(totalSales)}
           </div>
-          <div className="mt-2.5 w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-[72%] h-full bg-emerald-500 rounded-full"></div>
-          </div>
-          <p className="mt-2 text-[10px] text-slate-400 font-medium">Target: PKR 1.5M (Monthly)</p>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">vs last month</p>
         </div>
 
-        {/* Today's Sales */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Today's Sales
-            </span>
+        {/* 2. Orders -> Icon: ShoppingCart */}
+        <div
+          onClick={() => onNavigate('orders')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400">
+              <ShoppingCart className="h-5 w-5" strokeWidth={2} />
+            </div>
             <span className="text-blue-600 bg-blue-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-blue-950/50 dark:text-blue-400">
-              POS Live
+              ↑ 8.4%
             </span>
           </div>
-          <div className="text-2xl font-bold text-slate-900 dark:text-white">
-            {formatCurrency(todaySales || 740)}
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Orders
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {totalOrders}
           </div>
-          <div className="mt-2.5 w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-[58%] h-full bg-blue-500 rounded-full"></div>
-          </div>
-          <p className="mt-2 text-[10px] text-slate-400 font-medium">Daily Target: PKR 150K</p>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">{pendingOrders} pending dispatch</p>
         </div>
 
-        {/* Gross Profit */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Gross Profit
-            </span>
-            <span className="text-amber-600 bg-amber-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-amber-950/50 dark:text-amber-400">
-              ~65% Margin
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-slate-900 dark:text-white">
-            {formatCurrency(grossProfit)}
-          </div>
-          <div className="mt-2.5 w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-[65%] h-full bg-amber-500 rounded-full"></div>
-          </div>
-          <p className="mt-2 text-[10px] text-slate-400 font-medium">Sales minus COGS</p>
-        </div>
-
-        {/* Net Profit */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Net Profit
-            </span>
-            <span className="text-emerald-600 bg-emerald-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-emerald-950/50 dark:text-emerald-400">
-              Net Growth
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-slate-900 dark:text-white">
-            {formatCurrency(netProfit > 0 ? netProfit : grossProfit - totalExpenses)}
-          </div>
-          <div className="mt-2.5 w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-[48%] h-full bg-emerald-600 rounded-full"></div>
-          </div>
-          <p className="mt-2 text-[10px] text-slate-400 font-medium">After all operating expenses</p>
-        </div>
-      </div>
-
-      {/* Secondary Operational Metrics Grid */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
-        {/* Total Orders */}
-        <div
-          onClick={() => onNavigate('orders')}
-          className="group rounded-xl border border-slate-200 bg-white p-3 shadow-2xs hover:border-emerald-300 dark:border-slate-800 dark:bg-slate-900 cursor-pointer transition-all"
-        >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold">{t('totalOrders')}</span>
-            <ShoppingCart className="h-3.5 w-3.5 text-slate-400 group-hover:text-emerald-600" />
-          </div>
-          <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">{totalOrders}</div>
-          <span className="text-[10px] text-emerald-600 font-medium">View all orders →</span>
-        </div>
-
-        {/* Pending Orders */}
-        <div
-          onClick={() => onNavigate('orders')}
-          className="group rounded-xl border border-slate-200 bg-white p-3 shadow-2xs hover:border-amber-300 dark:border-slate-800 dark:bg-slate-900 cursor-pointer transition-all"
-        >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold">{t('pendingOrders')}</span>
-            <Clock className="h-3.5 w-3.5 text-amber-500" />
-          </div>
-          <div className="mt-1 text-lg font-black text-amber-600">{pendingOrders}</div>
-          <span className="text-[10px] text-slate-400">Needs dispatch</span>
-        </div>
-
-        {/* Completed Orders */}
-        <div
-          onClick={() => onNavigate('orders')}
-          className="group rounded-xl border border-slate-200 bg-white p-3 shadow-2xs hover:border-emerald-300 dark:border-slate-800 dark:bg-slate-900 cursor-pointer transition-all"
-        >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold">{t('completedOrders')}</span>
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-          </div>
-          <div className="mt-1 text-lg font-black text-emerald-600">{completedOrders}</div>
-          <span className="text-[10px] text-slate-400">Successfully delivered</span>
-        </div>
-
-        {/* Total Customers */}
+        {/* 3. Customers -> Icon: Users */}
         <div
           onClick={() => onNavigate('customers')}
-          className="group rounded-xl border border-slate-200 bg-white p-3 shadow-2xs hover:border-blue-300 dark:border-slate-800 dark:bg-slate-900 cursor-pointer transition-all"
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-purple-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
         >
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-semibold">{t('totalCustomers')}</span>
-            <Users className="h-3.5 w-3.5 text-blue-500" />
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400">
+              <Users className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-purple-600 bg-purple-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-purple-950/50 dark:text-purple-400">
+              ↑ 15.2%
+            </span>
           </div>
-          <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">{totalCustomers}</div>
-          <span className="text-[10px] text-blue-600">VIP & Wholesale</span>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Customers
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {totalCustomers}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Active client accounts</p>
         </div>
 
-        {/* Low Stock Items */}
+        {/* 4. Products -> Icon: Package */}
         <div
-          onClick={() => onNavigate('inventory')}
-          className="group rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20 cursor-pointer transition-all"
+          onClick={() => onNavigate('products')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-amber-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
         >
-          <div className="flex items-center justify-between text-amber-700 dark:text-amber-400">
-            <span className="text-[11px] font-bold">{t('lowStockProducts')}</span>
-            <AlertTriangle className="h-3.5 w-3.5" />
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+              <Package className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-amber-600 bg-amber-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-amber-950/50 dark:text-amber-400">
+              Active SKU
+            </span>
           </div>
-          <div className="mt-1 text-lg font-black text-amber-700 dark:text-amber-400">{lowStockProducts}</div>
-          <span className="text-[10px] text-amber-600 underline">Restock needed</span>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Products
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {totalProducts}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Catalog SKUs & Variations</p>
         </div>
 
-        {/* Out of Stock */}
+        {/* 5. Inventory -> Icon: Boxes */}
         <div
           onClick={() => onNavigate('inventory')}
-          className="group rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-950/20 cursor-pointer transition-all"
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-emerald-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
         >
-          <div className="flex items-center justify-between text-rose-700 dark:text-rose-400">
-            <span className="text-[11px] font-bold">{t('outOfStockProducts')}</span>
-            <XCircle className="h-3.5 w-3.5" />
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400">
+              <Boxes className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-teal-600 bg-teal-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-teal-950/50 dark:text-teal-400">
+              Healthy
+            </span>
           </div>
-          <div className="mt-1 text-lg font-black text-rose-700 dark:text-rose-400">{outOfStockProducts}</div>
-          <span className="text-[10px] text-rose-600 underline">Zero available</span>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Inventory
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {(products || []).reduce((s, p) => s + (p.stock || 0), 0)}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Total physical units</p>
+        </div>
+
+        {/* 6. Purchases -> Icon: ShoppingBag */}
+        <div
+          onClick={() => onNavigate('purchases')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-indigo-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
+              <ShoppingBag className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-indigo-600 bg-indigo-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-indigo-950/50 dark:text-indigo-400">
+              Procured
+            </span>
+          </div>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Purchases
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency((purchases || []).reduce((s, p) => s + (p.total || 0), 0))}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">{(purchases || []).length} supplier invoices</p>
+        </div>
+
+        {/* 7. Expenses -> Icon: Wallet */}
+        <div
+          onClick={() => onNavigate('expenses')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-rose-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400">
+              <Wallet className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-rose-600 bg-rose-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-rose-950/50 dark:text-rose-400">
+              ↓ 4.2%
+            </span>
+          </div>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Expenses
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency(totalExpenses)}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Operational & Packaging</p>
+        </div>
+
+        {/* 8. Profit -> Icon: TrendingUp */}
+        <div
+          onClick={() => onNavigate('accounting')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-emerald-400 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
+              <TrendingUp className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-emerald-600 bg-emerald-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-emerald-950/50 dark:text-emerald-400">
+              ↑ 18.0%
+            </span>
+          </div>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Profit
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency(netProfit > 0 ? netProfit : grossProfit - totalExpenses)}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Net profit after all costs</p>
+        </div>
+
+        {/* 9. Low Stock -> Icon: TriangleAlert */}
+        <div
+          onClick={() => onNavigate('inventory')}
+          className="group bg-white p-4 rounded-xl border border-amber-200 shadow-xs hover:border-amber-400 dark:bg-slate-900 dark:border-amber-900/40 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+              <TriangleAlert className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-amber-700 bg-amber-100/80 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-amber-950 dark:text-amber-300">
+              {lowStockProducts > 0 ? 'Action Req.' : 'Safe'}
+            </span>
+          </div>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Low Stock
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-amber-600 mt-1">
+            {lowStockProducts}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Below min reorder level</p>
+        </div>
+
+        {/* 10. Pending Payments -> Icon: Clock3 */}
+        <div
+          onClick={() => onNavigate('payments')}
+          className="group bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-orange-300 dark:bg-slate-900 dark:border-slate-800 transition-all cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="p-2 rounded-lg bg-orange-50 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400">
+              <Clock3 className="h-5 w-5" strokeWidth={2} />
+            </div>
+            <span className="text-orange-600 bg-orange-50 text-[10px] font-bold px-2 py-0.5 rounded dark:bg-orange-950/50 dark:text-orange-400">
+              Khata Due
+            </span>
+          </div>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Pending Payments
+          </span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency(
+              (customers || []).reduce((acc, c) => acc + (c.outstandingBalance || 0), 0)
+            )}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-400 font-medium">Customer dues & receivables</p>
         </div>
       </div>
 

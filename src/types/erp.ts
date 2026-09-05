@@ -58,6 +58,7 @@ export type ModuleName =
   | 'customers'
   | 'invoices'
   | 'payments'
+  | 'settlements'
   | 'expenses'
   | 'accounting'
   | 'profit_loss'
@@ -67,6 +68,11 @@ export type ModuleName =
   | 'roles'
   | 'audit'
   | 'notifications'
+  | 'sales_channels'
+  | 'sync_center'
+  | 'webhooks'
+  | 'sync_logs'
+  | 'connection_health'
   | 'website'
   | 'media'
   | 'pages'
@@ -214,6 +220,24 @@ export interface Product {
   tags: string[];
   hasVariations: boolean;
   variations: ProductVariation[];
+  reservedStock?: number;
+  availableStock?: number;
+  channelPricing?: {
+    website?: number;
+    daraz?: number;
+    shopify?: number;
+    woocommerce?: number;
+    wholesale?: number;
+  };
+  channelMappings?: Array<{
+    channelId: string;
+    channelCode: string;
+    externalProductId: string;
+    externalVariantId?: string;
+    externalSku?: string;
+    isSynced: boolean;
+    lastSyncedAt?: string;
+  }>;
   createdAt: string;
 }
 
@@ -244,13 +268,18 @@ export interface WarehouseInventory {
 }
 
 export type StockMovementType = 
+  | 'PURCHASE'
+  | 'SALE'
+  | 'RETURN'
+  | 'DAMAGE'
+  | 'ADJUSTMENT'
+  | 'TRANSFER'
+  | 'OPENING'
+  | 'PRODUCTION'
   | 'STOCK_IN' 
   | 'STOCK_OUT' 
-  | 'ADJUSTMENT' 
-  | 'TRANSFER' 
   | 'DAMAGED' 
-  | 'RETURNED' 
-  | 'SALE';
+  | 'RETURNED';
 
 export interface StockMovement {
   id: string;
@@ -375,14 +404,20 @@ export interface OrderItem {
 }
 
 export type OrderStatus =
-  | 'PENDING'
+  | 'NEW'
   | 'CONFIRMED'
   | 'PROCESSING'
   | 'PACKED'
+  | 'READY_TO_SHIP'
   | 'SHIPPED'
   | 'DELIVERED'
   | 'CANCELLED'
-  | 'RETURNED';
+  | 'RETURN_REQUESTED'
+  | 'RETURNED'
+  | 'REFUNDED'
+  | 'FAILED'
+  | 'ON_HOLD'
+  | 'PENDING';
 
 export type DeliveryStatus =
   | 'PENDING'
@@ -394,10 +429,15 @@ export type DeliveryStatus =
   | 'FAILED'
   | 'RETURNED';
 
+export type ChannelSource = 'WEBSITE' | 'DARAZ' | 'SHOPIFY' | 'WOOCOMMERCE' | 'POS' | 'MANUAL' | 'WHOLESALE' | 'RETAIL' | 'ONLINE';
+
 export interface Order {
   id: string;
   orderNumber: string;
-  channel: 'POS' | 'ONLINE' | 'MANUAL' | 'WHOLESALE' | 'RETAIL';
+  externalOrderId?: string;
+  channel: ChannelSource;
+  channelId?: string;
+  channelType?: 'WEBSITE' | 'DARAZ' | 'SHOPIFY' | 'WOOCOMMERCE' | 'POS' | 'MANUAL';
   customerId: string;
   customerName: string;
   customerPhone: string;
@@ -415,11 +455,16 @@ export interface Order {
   paymentStatus: 'PAID' | 'PARTIAL' | 'PENDING' | 'REFUNDED';
   orderStatus: OrderStatus;
   deliveryStatus: DeliveryStatus;
+  fulfillmentStatus?: 'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED' | 'RETURNED';
   warehouseId: string;
   courier?: string;
   trackingNumber?: string;
   dispatchDate?: string;
   deliveryDate?: string;
+  channelFee?: number;
+  commission?: number;
+  netProfit?: number;
+  rawExternalPayload?: string;
   notes?: string;
   createdAt: string;
 }
@@ -610,3 +655,185 @@ export interface MediaAsset {
   dimensions?: string;
   uploadedAt: string;
 }
+
+// ============================================================================
+// AH UNIVERSAL COMMERCE ERP - MULTI-CHANNEL SYNCHRONIZATION TYPES
+// ============================================================================
+
+export type ChannelPlatform = 'DARAZ' | 'WOOCOMMERCE' | 'SHOPIFY' | 'WEBSITE' | 'POS' | 'MANUAL';
+
+export interface SalesChannel {
+  id: string;
+  name: string;
+  platform: ChannelPlatform;
+  code: string;
+  description: string;
+  status: 'CONNECTED' | 'DISCONNECTED' | 'SYNCING' | 'ERROR';
+  isEnabled: boolean;
+  storeUrl?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  apiSecret?: string;
+  accessToken?: string;
+  webhookSecret?: string;
+  sellerId?: string;
+  darazAppKey?: string;
+  darazAppSecret?: string;
+  darazAccessToken?: string;
+  defaultWarehouseId: string;
+  autoSyncInventory: boolean;
+  autoSyncOrders: boolean;
+  priceMarkupPercentage: number; // e.g. 5% higher on Daraz
+  commissionRate: number; // e.g. 10.5% Daraz commission
+  paymentFeeRate: number; // e.g. 1.75% payment processing fee
+  fixedFeePerOrder: number; // e.g. Rs. 20 packaging or marketplace fixed charge
+  lastSyncTime?: string;
+  lastInventorySync?: string;
+  lastOrderSync?: string;
+  errorCount: number;
+  lastErrorMessage?: string;
+  stats: {
+    totalOrders: number;
+    totalRevenue: number;
+    pendingOrders: number;
+    syncedProducts: number;
+    activeListings: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelProductMapping {
+  id: string;
+  productId: string;
+  erpSku: string;
+  productName: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  externalProductId: string;
+  externalVariantId?: string;
+  externalSku: string;
+  channelPrice: number;
+  regularPrice: number;
+  stockAllocated: number;
+  isSynced: boolean;
+  syncError?: string;
+  lastSyncedAt?: string;
+  autoSync: boolean;
+}
+
+export interface WebhookEvent {
+  id: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  eventType: string; // 'order.created', 'order.updated', 'product.updated', etc.
+  externalEventId: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown> | string;
+  status: 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'FAILED';
+  attempts: number;
+  error?: string;
+  receivedAt: string;
+  processedAt?: string;
+}
+
+export interface SyncJob {
+  id: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  entityType: 'ORDERS' | 'PRODUCTS' | 'INVENTORY' | 'CUSTOMERS' | 'SETTLEMENTS';
+  direction: 'IMPORT' | 'EXPORT';
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  itemsProcessed: number;
+  itemsSucceeded: number;
+  itemsFailed: number;
+  error?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface SyncLog {
+  id: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  entity: 'ORDER' | 'PRODUCT' | 'INVENTORY' | 'CUSTOMER' | 'SETTLEMENT' | 'WEBHOOK';
+  entityId?: string;
+  externalId?: string;
+  operation: 'IMPORT' | 'EXPORT' | 'UPDATE' | 'DELETE' | 'WEBHOOK' | 'RECONCILIATION';
+  status: 'SUCCESS' | 'WARNING' | 'FAILED';
+  message: string;
+  details?: string;
+  durationMs?: number;
+  timestamp: string;
+}
+
+export interface MarketplaceSettlement {
+  id: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  channelName: string;
+  statementNumber: string;
+  periodStart: string;
+  periodEnd: string;
+  orderCount: number;
+  grossSales: number;
+  marketplaceCommission: number;
+  paymentGatewayFee: number;
+  shippingFee: number;
+  refundsDeducted: number;
+  otherAdjustments: number;
+  netSettlement: number;
+  expectedSettlement: number;
+  difference: number;
+  status: 'PENDING' | 'RECONCILED' | 'DISPUTED' | 'RECEIVED';
+  bankReference?: string;
+  payoutDate?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface InventoryReservation {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  productId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  status: 'RESERVED' | 'COMMITTED' | 'RELEASED';
+  reservedAt: string;
+  expiresAt?: string;
+}
+
+export interface MarketplaceFeeConfig {
+  id: string;
+  channelId: string;
+  platform: ChannelPlatform;
+  categoryName?: string;
+  commissionPercent: number;
+  paymentFeePercent: number;
+  fixedFeePerOrder: number;
+  shippingFeePercent?: number;
+  packagingCost: number;
+  otherFee: number;
+  isActive: boolean;
+}
+
+export interface ChannelHealthStatus {
+  channelId: string;
+  channelName: string;
+  platform: ChannelPlatform;
+  isConnected: boolean;
+  authStatus: 'HEALTHY' | 'DEGRADED' | 'EXPIRED' | 'OFFLINE';
+  productsSyncStatus: 'HEALTHY' | 'WARNING' | 'ERROR';
+  ordersSyncStatus: 'HEALTHY' | 'WARNING' | 'ERROR';
+  inventorySyncStatus: 'HEALTHY' | 'WARNING' | 'ERROR';
+  webhooksStatus: 'HEALTHY' | 'WARNING' | 'ERROR';
+  responseTimeMs: number;
+  lastHeartbeat: string;
+  lastSync: string;
+  errorSnippet?: string;
+}
+

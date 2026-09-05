@@ -35,6 +35,12 @@ import {
   History,
   DatabaseBackup,
   Settings,
+  Store,
+  RefreshCw,
+  FileClock,
+  Webhook,
+  Activity,
+  Landmark,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -93,6 +99,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
+      title: 'CHANNELS',
+      items: [
+        { id: 'sales_channels', label: 'Marketplaces', icon: Store, badge: '4 ACTIVE' },
+        { id: 'sync_center', label: 'Sync Center', icon: RefreshCw },
+        { id: 'sync_logs', label: 'Sync Logs', icon: FileClock },
+        { id: 'webhooks', label: 'Webhooks', icon: Webhook },
+        { id: 'connection_health', label: 'Health Status', icon: Activity },
+      ],
+    },
+    {
       title: 'PRODUCTS',
       items: [
         { id: 'products', label: t('products') || 'Products', icon: Package },
@@ -121,6 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { id: 'invoices', label: t('invoices') || 'Invoices', icon: Receipt },
         { id: 'payments', label: t('payments') || 'Payments', icon: CreditCard },
+        { id: 'settlements', label: 'Settlements', icon: Landmark, badge: 'AUTO' },
         { id: 'expenses', label: t('expenses') || 'Expenses', icon: Wallet },
         { id: 'accounting', label: t('accounting') || 'Accounting', icon: BookOpen },
         { id: 'profit_loss', label: 'Profit & Loss', icon: ChartNoAxesCombined },

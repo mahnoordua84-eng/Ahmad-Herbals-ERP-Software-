@@ -16,8 +16,12 @@ import {
   MapPin,
   X,
   ExternalLink,
+  Printer,
+  Download,
+  Check,
 } from 'lucide-react';
 import { Order, OrderStatus } from '../../types/erp';
+import { printService } from '../../services/printService';
 
 export const SalesOrdersView: React.FC = () => {
   const {
@@ -25,6 +29,7 @@ export const SalesOrdersView: React.FC = () => {
     updateOrderStatus,
     updateDeliveryStatus,
     formatCurrency,
+    brandSettings,
     t,
   } = useERP();
 
@@ -32,6 +37,12 @@ export const SalesOrdersView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [channelFilter, setChannelFilter] = useState<string>('ALL');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  const showNotification = (msg: string) => {
+    setActionSuccess(msg);
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
 
   // Status edit modal state
   const [editingStatusOrder, setEditingStatusOrder] = useState<Order | null>(null);
@@ -48,6 +59,30 @@ export const SalesOrdersView: React.FC = () => {
     const matchesChannel = channelFilter === 'ALL' || o.channel === channelFilter;
     return matchesSearch && matchesStatus && matchesChannel;
   });
+
+  const handleExportCSV = () => {
+    const exportData = filteredOrders.map((o) => ({
+      OrderNumber: o.orderNumber,
+      Customer: o.customerName,
+      Phone: o.customerPhone,
+      City: o.city,
+      Channel: o.channel,
+      ItemsCount: o.items.length,
+      Subtotal: o.subtotal,
+      Discount: o.discount,
+      Tax: o.tax,
+      Shipping: o.shipping,
+      Total: o.total,
+      PaymentStatus: o.paymentStatus,
+      PaymentMethod: o.paymentMethod,
+      OrderStatus: o.orderStatus,
+      Courier: o.courier || '',
+      TrackingNumber: o.trackingNumber || '',
+      Date: new Date(o.createdAt).toLocaleString(),
+    }));
+    printService.exportToCSV(exportData, `Sales_Orders_${new Date().toISOString().split('T')[0]}`);
+    showNotification('Sales orders exported to CSV!');
+  };
 
   const handleOpenStatusModal = (ord: Order) => {
     setEditingStatusOrder(ord);
@@ -69,11 +104,20 @@ export const SalesOrdersView: React.FC = () => {
         trackingNumber
       );
     }
+    showNotification(`Order #${editingStatusOrder.orderNumber} status updated to ${newStatus}!`);
     setEditingStatusOrder(null);
   };
 
   return (
     <div id="sales-orders-view" className="space-y-6 pb-12">
+      {/* Toast Notification */}
+      {actionSuccess && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg animate-in slide-in-from-bottom-2">
+          <Check className="h-4 w-4" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -86,6 +130,15 @@ export const SalesOrdersView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 cursor-pointer"
+            title="Export Sales Orders to CSV"
+          >
+            <Download className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Export CSV</span>
+          </button>
+
           <span className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
             {filteredOrders.length} Orders Listed
           </span>
@@ -227,6 +280,20 @@ export const SalesOrdersView: React.FC = () => {
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
+                          onClick={() => printService.printReceipt(ord, brandSettings)}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-emerald-600 dark:hover:bg-slate-800 cursor-pointer"
+                          title="Print Thermal POS Receipt"
+                        >
+                          <Receipt className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => printService.printInvoice(ord, brandSettings)}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800 cursor-pointer"
+                          title="Print A4 Tax Invoice"
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                        </button>
+                        <button
                           onClick={() => setSelectedOrder(ord)}
                           className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 dark:hover:bg-slate-800 cursor-pointer"
                           title="View Order Details"
@@ -329,7 +396,27 @@ export const SalesOrdersView: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => printService.printReceipt(selectedOrder, brandSettings)}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Receipt className="h-4 w-4 text-emerald-600" />
+                  <span>Thermal Receipt</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => printService.printInvoice(selectedOrder, brandSettings)}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Printer className="h-4 w-4 text-blue-600" />
+                  <span>A4 Tax Invoice</span>
+                </button>
+              </div>
+
               <button
                 onClick={() => setSelectedOrder(null)}
                 className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white dark:bg-emerald-600 cursor-pointer"

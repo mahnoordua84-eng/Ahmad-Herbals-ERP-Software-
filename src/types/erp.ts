@@ -115,6 +115,9 @@ export interface BrandSettings {
   taxName: string;
   taxRate: number; // percentage
   websiteUrl: string;
+  ntnNumber?: string;
+  taxNumber?: string;
+  strnNumber?: string;
   socialLinks: {
     facebook?: string;
     instagram?: string;
@@ -336,6 +339,7 @@ export interface PurchaseItem {
   weightLabel?: string;
   quantity: number;
   purchasePrice: number;
+  unitCost?: number;
   costPrice?: number;
   total: number;
 }
@@ -355,9 +359,12 @@ export interface Purchase {
   total: number;
   paid: number;
   due: number;
+  paidAmount?: number;
+  dueAmount?: number;
   paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
   status: 'DRAFT' | 'ORDERED' | 'RECEIVED' | 'CANCELLED';
   date: string;
+  createdAt?: string;
   notes?: string;
 }
 
@@ -486,8 +493,11 @@ export interface Invoice {
   total: number;
   paidAmount: number;
   dueAmount: number;
+  paid?: number;
+  due?: number;
   paymentMethod: string;
-  paymentStatus: 'PAID' | 'PARTIAL' | 'PENDING';
+  paymentStatus: 'PAID' | 'PARTIAL' | 'PENDING' | 'UNPAID';
+  status?: 'PAID' | 'PARTIAL' | 'PENDING' | 'UNPAID';
   date: string;
 }
 
@@ -602,7 +612,7 @@ export interface AuditLog {
 
 export interface ERPNotification {
   id: string;
-  type: 'ORDER' | 'STOCK' | 'PAYMENT' | 'CUSTOMER' | 'PURCHASE' | 'RETURN' | 'EXPENSE' | 'SYSTEM';
+  type: 'ORDER' | 'STOCK' | 'PAYMENT' | 'CUSTOMER' | 'PURCHASE' | 'RETURN' | 'EXPENSE' | 'SYSTEM' | 'CHANNEL';
   title: string;
   message: string;
   timestamp: string;
@@ -687,6 +697,7 @@ export interface SalesChannel {
   commissionRate: number; // e.g. 10.5% Daraz commission
   paymentFeeRate: number; // e.g. 1.75% payment processing fee
   fixedFeePerOrder: number; // e.g. Rs. 20 packaging or marketplace fixed charge
+  syncIntervalMinutes?: number;
   lastSyncTime?: string;
   lastInventorySync?: string;
   lastOrderSync?: string;
@@ -760,7 +771,7 @@ export interface SyncLog {
   entityId?: string;
   externalId?: string;
   operation: 'IMPORT' | 'EXPORT' | 'UPDATE' | 'DELETE' | 'WEBHOOK' | 'RECONCILIATION';
-  status: 'SUCCESS' | 'WARNING' | 'FAILED';
+  status: 'SUCCESS' | 'WARNING' | 'FAILED' | 'ERROR';
   message: string;
   details?: string;
   durationMs?: number;

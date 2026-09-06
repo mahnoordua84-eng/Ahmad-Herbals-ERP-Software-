@@ -11,8 +11,14 @@ import {
   XCircle,
   Building2,
   X,
+  CreditCard,
+  Banknote,
+  Smartphone,
+  Receipt,
+  Plus,
 } from 'lucide-react';
 import { Invoice } from '../../types/erp';
+import { printService } from '../../services/printService';
 
 export const InvoicesView: React.FC = () => {
   const {
@@ -20,18 +26,77 @@ export const InvoicesView: React.FC = () => {
     orders,
     formatCurrency,
     brandSettings,
+    addInvoicePayment,
     t,
   } = useERP();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
-  const filteredInvoices = invoices.filter(
-    (inv) =>
+  // Payment Recording Modal State
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [payAmount, setPayAmount] = useState<number>(0);
+  const [payMethod, setPayMethod] = useState<string>('CASH');
+  const [payNote, setPayNote] = useState<string>('');
+
+  const filteredInvoices = invoices.filter((inv) => {
+    const matchesSearch =
       inv.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inv.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inv.orderNumber.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      inv.orderNumber.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesStatus =
+      statusFilter === 'ALL' ||
+      (statusFilter === 'PAID' && inv.status === 'PAID') ||
+      (statusFilter === 'PARTIAL' && inv.status === 'PARTIAL') ||
+      (statusFilter === 'UNPAID' && inv.status === 'UNPAID');
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const handleExportCSV = () => {
+    const exportData = filteredInvoices.map((inv) => ({
+      InvoiceNumber: inv.invoiceNumber,
+      OrderNumber: inv.orderNumber,
+      Customer: inv.customerName,
+      Date: inv.date,
+      Subtotal: inv.subtotal,
+      Discount: inv.discount,
+      Tax: inv.tax,
+      Total: inv.total,
+      Paid: inv.paid,
+      Due: inv.due,
+      Status: inv.status,
+    }));
+    printService.exportToCSV(exportData, `Invoices_Export_${new Date().toISOString().split('T')[0]}`);
+  };
+
+  const openPaymentModal = (inv: Invoice) => {
+    setPaymentInvoice(inv);
+    setPayAmount(inv.due);
+    setPayMethod('CASH');
+    setPayNote(`Settlement for invoice #${inv.invoiceNumber}`);
+  };
+
+  const handlePaymentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentInvoice || payAmount <= 0) return;
+    addInvoicePayment(paymentInvoice.id, payAmount, payMethod, payNote);
+    
+    if (selectedInvoice && selectedInvoice.id === paymentInvoice.id) {
+      const updatedPaid = selectedInvoice.paid + payAmount;
+      const updatedDue = Math.max(0, selectedInvoice.total - updatedPaid);
+      setSelectedInvoice({
+        ...selectedInvoice,
+        paid: updatedPaid,
+        due: updatedDue,
+        status: updatedDue <= 0 ? 'PAID' : 'PARTIAL',
+      });
+    }
+
+    setPaymentInvoice(null);
+  };
 
   return (
     <div id="invoices-view" className="space-y-6 pb-12">
@@ -46,13 +111,23 @@ export const InvoicesView: React.FC = () => {
           </p>
         </div>
 
-        <span className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-          {filteredInvoices.length} Invoices Found
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 cursor-pointer shadow-2xs"
+          >
+            <Download className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Export CSV</span>
+          </button>
+          <span className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            {filteredInvoices.length} Invoices
+          </span>
+        </div>
       </div>
 
-      {/* Search */}
-      <div className="flex rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 shadow-2xs">
+      {/* Filter & Search Bar */}
+      <div className="flex flex-col sm:flex-row gap-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 shadow-2xs">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
@@ -62,6 +137,24 @@ export const InvoicesView: React.FC = () => {
             placeholder="Search invoice number, order # or customer name..."
             className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
+        </div>
+
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1 overflow-x-auto">
+          {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
+            <button
+              key={st}
+              type="button"
+              onClick={() => setStatusFilter(st)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors ${
+                statusFilter === st
+                  ? 'bg-slate-900 text-white dark:bg-emerald-600'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+              }`}
+            >
+              {st}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -119,13 +212,36 @@ export const InvoicesView: React.FC = () => {
                     </span>
                   </td>
                   <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={() => setSelectedInvoice(inv)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer shadow-2xs"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      <span>View & Print</span>
-                    </button>
+                    <div className="inline-flex items-center gap-1.5">
+                      {inv.due > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openPaymentModal(inv)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
+                          title="Record payment received"
+                        >
+                          <CreditCard className="h-3 w-3" />
+                          <span>Pay</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInvoice(inv)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer shadow-2xs"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>View</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printService.printInvoice(inv, brandSettings)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-black dark:bg-emerald-600 cursor-pointer"
+                        title="Print A4 Tax Invoice"
+                      >
+                        <Printer className="h-3 w-3" />
+                        <span>Print</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -254,14 +370,26 @@ export const InvoicesView: React.FC = () => {
                 This is a computer-generated tax invoice for Ahmad Herbals.
               </p>
               <div className="flex gap-2">
+                {selectedInvoice.due > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openPaymentModal(selectedInvoice)}
+                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 cursor-pointer shadow-xs"
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    <span>Record Payment</span>
+                  </button>
+                )}
                 <button
-                  onClick={() => window.print()}
+                  type="button"
+                  onClick={() => printService.printInvoice(selectedInvoice, brandSettings)}
                   className="flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-black dark:bg-emerald-600 cursor-pointer"
                 >
                   <Printer className="h-4 w-4" />
                   <span>Print Invoice</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setSelectedInvoice(null)}
                   className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 cursor-pointer"
                 >
@@ -269,6 +397,124 @@ export const InvoicesView: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Payment Modal */}
+      {paymentInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 p-6">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-emerald-600" />
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Record Invoice Payment
+                </h2>
+              </div>
+              <button
+                onClick={() => setPaymentInvoice(null)}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePaymentSubmit} className="mt-4 space-y-3 text-xs">
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Invoice:</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white">
+                    {paymentInvoice.invoiceNumber}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Customer:</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {paymentInvoice.customerName}
+                  </span>
+                </div>
+                <div className="flex justify-between text-rose-600 font-bold">
+                  <span>Current Outstanding Due:</span>
+                  <span>{formatCurrency(paymentInvoice.due)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Payment Amount Received *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  max={paymentInvoice.due}
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold font-mono text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Payment Channel / Mode
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'CASH', label: 'Cash Payment', icon: Banknote },
+                    { id: 'EASYPAISA', label: 'Easypaisa / JazzCash', icon: Smartphone },
+                    { id: 'BANK_TRANSFER', label: 'Bank Direct Transfer', icon: CreditCard },
+                    { id: 'CHEQUE', label: 'Company Cheque', icon: Receipt },
+                  ].map((m) => {
+                    const Icon = m.icon;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setPayMethod(m.id)}
+                        className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold cursor-pointer ${
+                          payMethod === m.id
+                            ? 'border-emerald-600 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                            : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 text-emerald-600" />
+                        <span>{m.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Payment Reference / Note
+                </label>
+                <input
+                  type="text"
+                  value={payNote}
+                  onChange={(e) => setPayNote(e.target.value)}
+                  placeholder="e.g. Bank slip #98421 or Cash counter receipt"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPaymentInvoice(null)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
+                >
+                  Save & Update Ledger
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

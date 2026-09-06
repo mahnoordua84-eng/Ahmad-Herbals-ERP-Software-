@@ -13,14 +13,19 @@ import {
   Trash2,
   X,
   CreditCard,
+  Printer,
+  Download,
+  Check,
 } from 'lucide-react';
 import { Customer } from '../../types/erp';
+import { printService } from '../../services/printService';
 
 export const CustomersView: React.FC = () => {
   const {
     customers,
     customerLedger,
     orders,
+    brandSettings,
     addCustomer,
     updateCustomer,
     deleteCustomer,
@@ -35,6 +40,12 @@ export const CustomersView: React.FC = () => {
   const [editingCust, setEditingCust] = useState<Customer | null>(null);
   const [selectedLedgerCust, setSelectedLedgerCust] = useState<Customer | null>(null);
   const [paymentModalCust, setPaymentModalCust] = useState<Customer | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  const showNotification = (msg: string) => {
+    setActionSuccess(msg);
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
 
   // Form state
   const [formData, setFormData] = useState({
@@ -80,8 +91,10 @@ export const CustomersView: React.FC = () => {
     e.preventDefault();
     if (editingCust) {
       updateCustomer(editingCust.id, formData);
+      showNotification('Customer record updated successfully!');
     } else {
       addCustomer(formData);
+      showNotification('New customer registered successfully!');
     }
     setIsAddModalOpen(false);
   };
@@ -90,9 +103,40 @@ export const CustomersView: React.FC = () => {
     e.preventDefault();
     if (!paymentModalCust || paymentAmount <= 0) return;
     addCustomerPayment(paymentModalCust.id, Number(paymentAmount), paymentMethod, paymentNotes);
+    showNotification(`Recorded payment of ${formatCurrency(paymentAmount)} from ${paymentModalCust.name}`);
     setPaymentModalCust(null);
     setPaymentAmount(0);
     setPaymentNotes('');
+  };
+
+  const handleExportCustomersCSV = () => {
+    const rows = filteredCustomers.map((c) => ({
+      'Customer Name': c.name,
+      'Phone': c.phone,
+      'Email': c.email || '',
+      'City': c.city,
+      'Address': c.address,
+      'Credit Limit (PKR)': c.creditLimit,
+      'Credit Balance Due (PKR)': c.creditBalance,
+      'Total Spent (PKR)': c.totalSpent,
+      'Loyalty Points': c.loyaltyPoints,
+    }));
+    printService.exportToCSV(rows, `Ahmad_Herbals_Customers_${new Date().toISOString().split('T')[0]}`);
+    showNotification('Customers directory exported to CSV!');
+  };
+
+  const handleExportLedgerCSV = (c: Customer) => {
+    const entries = customerLedger.filter((l) => l.customerId === c.id);
+    const rows = entries.map((e) => ({
+      'Date': e.date,
+      'Ref No': e.referenceNo,
+      'Description': e.description,
+      'Debit (Sale)': e.debit,
+      'Credit (Received)': e.credit,
+      'Balance': e.balance,
+    }));
+    printService.exportToCSV(rows, `Customer_Khata_${c.name.replace(/\s+/g, '_')}`);
+    showNotification('Customer statement exported to CSV!');
   };
 
   const filteredCustomers = customers.filter(
@@ -104,6 +148,14 @@ export const CustomersView: React.FC = () => {
 
   return (
     <div id="customers-view" className="space-y-6 pb-12">
+      {/* Toast Notification */}
+      {actionSuccess && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg animate-in slide-in-from-bottom-2">
+          <Check className="h-4 w-4" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -115,13 +167,24 @@ export const CustomersView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add Customer</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleExportCustomersCSV}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+            title="Export Customers to CSV"
+          >
+            <Download className="h-4 w-4 text-slate-500" />
+            <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Customer</span>
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -302,7 +365,33 @@ export const CustomersView: React.FC = () => {
               </table>
             </div>
 
-            <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    printService.printCustomerLedger(
+                      selectedLedgerCust,
+                      customerLedger.filter((l) => l.customerId === selectedLedgerCust.id),
+                      brandSettings
+                    )
+                  }
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Printer className="h-4 w-4 text-emerald-600" />
+                  <span>Print Statement</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportLedgerCSV(selectedLedgerCust)}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Download className="h-4 w-4 text-slate-500" />
+                  <span>Export CSV</span>
+                </button>
+              </div>
+
               <button
                 onClick={() => setSelectedLedgerCust(null)}
                 className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white dark:bg-emerald-600 cursor-pointer"

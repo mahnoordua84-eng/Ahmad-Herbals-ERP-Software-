@@ -14,8 +14,12 @@ import {
   X,
   Warehouse as WarehouseIcon,
   ShieldAlert,
+  Download,
+  Printer,
+  Check,
 } from 'lucide-react';
 import { StockMovementType } from '../../types/erp';
+import { printService } from '../../services/printService';
 
 export const InventoryView: React.FC = () => {
   const {
@@ -25,6 +29,7 @@ export const InventoryView: React.FC = () => {
     stockMovements,
     adjustStock,
     formatCurrency,
+    brandSettings,
     t,
   } = useERP();
 
@@ -32,6 +37,12 @@ export const InventoryView: React.FC = () => {
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('ALL');
   const [activeTab, setActiveTab] = useState<'STOCK' | 'LOGS'>('STOCK');
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  const showNotification = (msg: string) => {
+    setActionSuccess(msg);
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
 
   // Form for stock adjustment
   const [adjustForm, setAdjustForm] = useState({
@@ -69,8 +80,54 @@ export const InventoryView: React.FC = () => {
       delta = Math.abs(qty);
     }
 
+    const targetProd = products.find((p) => p.id === adjustForm.productId);
     adjustStock(adjustForm.productId, adjustForm.warehouseId, delta, adjustForm.type, adjustForm.reason);
+    showNotification(`Stock adjusted for ${targetProd ? targetProd.name : 'product'} (${delta > 0 ? `+${delta}` : delta})`);
     setIsAdjustModalOpen(false);
+  };
+
+  const handleExportStockCSV = () => {
+    const exportData = filteredProducts.map((p) => {
+      const invRecords = warehouseInventory.filter(
+        (wi) => wi.productId === p.id && (selectedWarehouse === 'ALL' || wi.warehouseId === selectedWarehouse)
+      );
+      const physical = invRecords.reduce((acc, curr) => acc + curr.physicalStock, 0) || p.stock;
+      const reserved = invRecords.reduce((acc, curr) => acc + curr.reservedStock, 0);
+      const damaged = invRecords.reduce((acc, curr) => acc + curr.damagedStock, 0);
+      const available = Math.max(0, physical - reserved - damaged);
+
+      return {
+        Product: p.name,
+        SKU: p.sku,
+        Category: p.category,
+        Unit: p.unit,
+        PhysicalStock: physical,
+        ReservedStock: reserved,
+        DamagedStock: damaged,
+        AvailableStock: available,
+        MinStockAlert: p.minStock,
+        PurchasePrice: p.purchasePrice,
+        RetailPrice: p.price,
+        Valuation: available * p.purchasePrice,
+      };
+    });
+    printService.exportToCSV(exportData, `Stock_Valuation_${new Date().toISOString().split('T')[0]}`);
+    showNotification('Inventory stock valuation exported to CSV!');
+  };
+
+  const handleExportLogsCSV = () => {
+    const exportData = stockMovements.map((sm) => ({
+      Timestamp: new Date(sm.createdAt).toLocaleString(),
+      Product: sm.productName,
+      Warehouse: sm.warehouseName,
+      MovementType: sm.type,
+      DeltaQuantity: sm.quantity,
+      StockBefore: sm.stockBefore,
+      StockAfter: sm.stockAfter,
+      Reason: sm.reason,
+    }));
+    printService.exportToCSV(exportData, `Stock_Movement_Logs_${new Date().toISOString().split('T')[0]}`);
+    showNotification('Movement audit logs exported to CSV!');
   };
 
   const filteredProducts = products.filter((p) => {
@@ -82,6 +139,14 @@ export const InventoryView: React.FC = () => {
 
   return (
     <div id="inventory-view" className="space-y-6 pb-12">
+      {/* Toast Notification */}
+      {actionSuccess && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg animate-in slide-in-from-bottom-2">
+          <Check className="h-4 w-4" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -93,7 +158,7 @@ export const InventoryView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
             <button
               onClick={() => setActiveTab('STOCK')}
@@ -116,6 +181,15 @@ export const InventoryView: React.FC = () => {
               Movement Logs ({stockMovements.length})
             </button>
           </div>
+
+          <button
+            onClick={activeTab === 'STOCK' ? handleExportStockCSV : handleExportLogsCSV}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+            title="Export to CSV"
+          >
+            <Download className="h-4 w-4 text-slate-500" />
+            <span>Export CSV</span>
+          </button>
 
           <button
             onClick={() => handleOpenAdjust()}

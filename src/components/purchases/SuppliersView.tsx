@@ -14,13 +14,18 @@ import {
   X,
   FileText,
   DollarSign,
+  Printer,
+  Download,
+  Check,
 } from 'lucide-react';
 import { Supplier } from '../../types/erp';
+import { printService } from '../../services/printService';
 
 export const SuppliersView: React.FC = () => {
   const {
     suppliers,
     supplierLedger,
+    brandSettings,
     addSupplier,
     updateSupplier,
     deleteSupplier,
@@ -35,6 +40,12 @@ export const SuppliersView: React.FC = () => {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [selectedLedgerSupplier, setSelectedLedgerSupplier] = useState<Supplier | null>(null);
   const [paymentModalSupplier, setPaymentModalSupplier] = useState<Supplier | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  const showNotification = (msg: string) => {
+    setActionSuccess(msg);
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
 
   // Form states
   const [formData, setFormData] = useState({
@@ -86,8 +97,10 @@ export const SuppliersView: React.FC = () => {
     e.preventDefault();
     if (editingSupplier) {
       updateSupplier(editingSupplier.id, formData);
+      showNotification('Supplier profile updated successfully!');
     } else {
       addSupplier(formData);
+      showNotification('New supplier added successfully!');
     }
     setIsAddModalOpen(false);
   };
@@ -96,9 +109,41 @@ export const SuppliersView: React.FC = () => {
     e.preventDefault();
     if (!paymentModalSupplier || paymentAmount <= 0) return;
     addSupplierPayment(paymentModalSupplier.id, Number(paymentAmount), paymentMethod, paymentNotes);
+    showNotification(`Disbursed payment of ${formatCurrency(paymentAmount)} to ${paymentModalSupplier.company}`);
     setPaymentModalSupplier(null);
     setPaymentAmount(0);
     setPaymentNotes('');
+  };
+
+  const handleExportSuppliersCSV = () => {
+    const rows = filteredSuppliers.map((s) => ({
+      'Company': s.company,
+      'Contact Person': s.name,
+      'Phone': s.phone,
+      'Email': s.email || '',
+      'City': s.city,
+      'Address': s.address,
+      'Payment Terms': s.paymentTerms,
+      'Total Procurement (PKR)': s.totalPurchases,
+      'Paid Amount (PKR)': s.paidAmount,
+      'Outstanding Due (PKR)': s.outstandingBalance,
+    }));
+    printService.exportToCSV(rows, `Ahmad_Herbals_Suppliers_${new Date().toISOString().split('T')[0]}`);
+    showNotification('Suppliers directory exported to CSV!');
+  };
+
+  const handleExportLedgerCSV = (s: Supplier) => {
+    const entries = supplierLedger.filter((l) => l.supplierId === s.id);
+    const rows = entries.map((e) => ({
+      'Date': e.date,
+      'Reference': e.referenceNo,
+      'Description': e.description,
+      'Debit (Paid)': e.debit,
+      'Credit (Billed)': e.credit,
+      'Balance': e.balance,
+    }));
+    printService.exportToCSV(rows, `Supplier_Ledger_${s.company.replace(/\s+/g, '_')}`);
+    showNotification('Vendor statement exported to CSV!');
   };
 
   const filteredSuppliers = suppliers.filter(
@@ -110,6 +155,14 @@ export const SuppliersView: React.FC = () => {
 
   return (
     <div id="suppliers-view" className="space-y-6 pb-12">
+      {/* Toast Notification */}
+      {actionSuccess && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg animate-in slide-in-from-bottom-2">
+          <Check className="h-4 w-4" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -121,13 +174,24 @@ export const SuppliersView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add Supplier</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleExportSuppliersCSV}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+            title="Export Suppliers to CSV"
+          >
+            <Download className="h-4 w-4 text-slate-500" />
+            <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Supplier</span>
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -305,7 +369,31 @@ export const SuppliersView: React.FC = () => {
               </table>
             </div>
 
-            <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() =>
+                    printService.printSupplierLedger(
+                      selectedLedgerSupplier,
+                      supplierLedger.filter((l) => l.supplierId === selectedLedgerSupplier.id),
+                      brandSettings
+                    )
+                  }
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Printer className="h-4 w-4 text-emerald-600" />
+                  <span>Print Statement</span>
+                </button>
+
+                <button
+                  onClick={() => handleExportLedgerCSV(selectedLedgerSupplier)}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                >
+                  <Download className="h-4 w-4 text-slate-500" />
+                  <span>Export CSV</span>
+                </button>
+              </div>
+
               <button
                 onClick={() => setSelectedLedgerSupplier(null)}
                 className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white dark:bg-emerald-600 cursor-pointer"

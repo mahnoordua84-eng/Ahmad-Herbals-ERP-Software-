@@ -24,6 +24,12 @@ import { AuditLogsView } from './components/admin/AuditLogsView';
 import { MarketingView } from './components/marketing/MarketingView';
 import { SettingsView } from './components/settings/SettingsView';
 import { ReportsView } from './components/finance/ReportsView';
+import { ChannelsOverviewView } from './components/channels/ChannelsOverviewView';
+import { SyncCenterView } from './components/channels/SyncCenterView';
+import { SyncLogsView } from './components/channels/SyncLogsView';
+import { WebhooksView } from './components/channels/WebhooksView';
+import { ConnectionHealthView } from './components/channels/ConnectionHealthView';
+import { SettlementsView } from './components/channels/SettlementsView';
 
 import { ModuleName } from './types/erp';
 import { ShieldAlert } from 'lucide-react';
@@ -92,6 +98,18 @@ const ERPMainContent: React.FC = () => {
         return <POSView />;
       case 'customers':
         return <CustomersView />;
+      case 'sales_channels':
+        return <ChannelsOverviewView />;
+      case 'sync_center':
+        return <SyncCenterView />;
+      case 'sync_logs':
+        return <SyncLogsView />;
+      case 'webhooks':
+        return <WebhooksView />;
+      case 'connection_health':
+        return <ConnectionHealthView />;
+      case 'settlements':
+        return <SettlementsView />;
       case 'products':
         return <ProductsView />;
       case 'categories':

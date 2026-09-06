@@ -110,6 +110,11 @@ interface ERPContextType {
   websiteCMS: WebsiteCMS;
   mediaAssets: MediaAsset[];
   
+  // Active Navigation Module & Current User
+  activeModule: ModuleName;
+  setActiveModule: (module: ModuleName) => void;
+  currentUserRole: RoleType;
+
   // App Environment & Preferences
   language: Language;
   setLanguage: (lang: Language) => void;
@@ -118,7 +123,10 @@ interface ERPContextType {
   toggleDarkMode: () => void;
   formatCurrency: (amount: number) => string;
   setCurrentRole: (role: RoleType) => void;
-  hasPermission: (module: ModuleName, action: PermissionAction) => boolean;
+  hasPermission: (
+    moduleOrRole: ModuleName | RoleType | string,
+    actionOrModule?: PermissionAction | ModuleName
+  ) => boolean;
   setActiveBrandId: (brandId: string) => void;
 
   // Actions
@@ -163,6 +171,7 @@ interface ERPContextType {
   // Purchases & Suppliers
   addPurchase: (purchase: Omit<Purchase, 'id' | 'invoiceNumber'>) => void;
   receivePurchase: (purchaseId: string) => void;
+  addPurchasePayment: (purchaseId: string, amount: number, method: string, notes?: string) => void;
   addSupplier: (supplier: Omit<Supplier, 'id' | 'totalPurchases' | 'paidAmount' | 'outstandingBalance'>) => void;
   updateSupplier: (id: string, supplier: Partial<Supplier>) => void;
   deleteSupplier: (id: string) => void;
@@ -195,6 +204,7 @@ interface ERPContextType {
   updateCustomer: (id: string, customer: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
   addCustomerPayment: (customerId: string, amount: number, method: string, note?: string) => void;
+  addInvoicePayment: (invoiceId: string, amount: number, method: string, note?: string) => void;
 
   // Payments & Methods
   addPaymentMethod: (method: Omit<PaymentMethodConfig, 'id'>) => void;
@@ -376,6 +386,14 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const [rolePermissions] = useState<Record<string, RolePermissions>>(initialRolePermissions);
   const [currentRole, setCurrentRole] = useState<RoleType>('Super Admin');
+  const [activeModule, setActiveModuleState] = useState<ModuleName>(() => {
+    return (localStorage.getItem('ah_erp_active_module') as ModuleName) || 'dashboard';
+  });
+
+  const setActiveModule = (mod: ModuleName) => {
+    setActiveModuleState(mod);
+    localStorage.setItem('ah_erp_active_module', mod);
+  };
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
     const saved = localStorage.getItem('ah_erp_audit_logs');
@@ -622,12 +640,40 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return `${formattedNum} ${brandSettings.currencySymbol}`;
   };
 
-  const hasPermission = (module: ModuleName, action: PermissionAction): boolean => {
+  const hasPermission = (
+    moduleOrRole: ModuleName | RoleType | string,
+    actionOrModule: PermissionAction | ModuleName = 'view'
+  ): boolean => {
+    const knownRoles = [
+      'Super Admin',
+      'Admin',
+      'Manager',
+      'Inventory Manager',
+      'Sales Manager',
+      'Purchase Manager',
+      'Accountant',
+      'Warehouse Manager',
+      'POS User',
+      'Delivery Manager',
+      'Content Manager',
+    ];
+
+    if (knownRoles.includes(moduleOrRole)) {
+      if (moduleOrRole === 'Super Admin') return true;
+      const roleConf = rolePermissions[moduleOrRole];
+      if (!roleConf) return false;
+      const targetMod = actionOrModule as ModuleName;
+      const modulePerms = roleConf.permissions[targetMod];
+      return modulePerms ? modulePerms.includes('view') : false;
+    }
+
     if (currentRole === 'Super Admin') return true;
     const roleConf = rolePermissions[currentRole];
     if (!roleConf) return false;
-    const modulePerms = roleConf.permissions[module];
-    return modulePerms ? modulePerms.includes(action) : false;
+    const targetModule = moduleOrRole as ModuleName;
+    const targetAction = (actionOrModule as PermissionAction) || 'view';
+    const modulePerms = roleConf.permissions[targetModule];
+    return modulePerms ? modulePerms.includes(targetAction) : false;
   };
 
   const logAudit = (action: string, module: ModuleName, recordId: string, oldValue?: string, newValue?: string) => {
@@ -1055,6 +1101,31 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   };
 
+  const addPurchasePayment = (purchaseId: string, amount: number, method: string, notes?: string) => {
+    const po = purchases.find((p) => p.id === purchaseId);
+    if (!po) return;
+
+    const newPaid = (po.paid || 0) + amount;
+    const newDue = Math.max(0, po.total - newPaid);
+    const newPaymentStatus = newDue === 0 ? 'PAID' : 'PARTIAL';
+
+    setPurchases((prev) =>
+      prev.map((p) =>
+        p.id === purchaseId
+          ? {
+              ...p,
+              paid: newPaid,
+              due: newDue,
+              paymentStatus: newPaymentStatus,
+            }
+          : p
+      )
+    );
+
+    addSupplierPayment(po.supplierId, amount, method, notes || `Payment for PO #${po.invoiceNumber}`);
+    logAudit(`Disbursed Payment of ${formatCurrency(amount)} for PO #${po.invoiceNumber}`, 'purchases', purchaseId);
+  };
+
   const addSupplierPayment = (supplierId: string, amount: number, method: string, notes?: string) => {
     const sup = suppliers.find((s) => s.id === supplierId);
     if (!sup) return;
@@ -1139,6 +1210,79 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setPaymentRecords((prev) => [payRec, ...prev]);
     logAudit(`Customer Payment Received: ${formatCurrency(amount)}`, 'customers', customerId);
+  };
+
+  const addInvoicePayment = (invoiceId: string, amount: number, method: string, note?: string) => {
+    const inv = invoices.find((i) => i.id === invoiceId || i.invoiceNumber === invoiceId);
+    if (!inv) return;
+
+    const paymentAmt = Math.min(amount, inv.due > 0 ? inv.due : amount);
+    const newPaid = inv.paid + paymentAmt;
+    const newDue = Math.max(0, inv.total - newPaid);
+    const newStatus: Invoice['status'] = newDue <= 0 ? 'PAID' : 'PARTIAL';
+
+    setInvoices((prev) =>
+      prev.map((i) =>
+        i.id === inv.id
+          ? { ...i, paid: newPaid, due: newDue, status: newStatus }
+          : i
+      )
+    );
+
+    if (inv.customerId) {
+      setCustomers((prev) =>
+        prev.map((c) =>
+          c.id === inv.customerId
+            ? { ...c, outstandingBalance: Math.max(0, c.outstandingBalance - paymentAmt) }
+            : c
+        )
+      );
+
+      const cust = customers.find((c) => c.id === inv.customerId);
+      const ledger: CustomerLedgerEntry = {
+        id: `cl-${Date.now()}`,
+        customerId: inv.customerId,
+        date: new Date().toISOString().split('T')[0],
+        type: 'PAYMENT',
+        referenceNo: inv.invoiceNumber,
+        description: note || `Payment against invoice ${inv.invoiceNumber} via ${method}`,
+        debit: 0,
+        credit: paymentAmt,
+        balance: cust ? Math.max(0, cust.outstandingBalance - paymentAmt) : 0,
+      };
+      setCustomerLedger((prev) => [ledger, ...prev]);
+    }
+
+    if (inv.orderId) {
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id === inv.orderId || o.orderNumber === inv.orderNumber) {
+            const ordPaid = o.paidAmount + paymentAmt;
+            return {
+              ...o,
+              paidAmount: ordPaid,
+              paymentStatus: ordPaid >= o.total ? 'PAID' : 'PARTIAL',
+            };
+          }
+          return o;
+        })
+      );
+    }
+
+    const payRec: PaymentRecord = {
+      id: `pay-${Date.now()}`,
+      customerId: inv.customerId,
+      customerName: inv.customerName,
+      type: 'INFLOW',
+      amount: paymentAmt,
+      method,
+      transactionRef: inv.invoiceNumber,
+      date: new Date().toISOString(),
+      note: note || `Payment against invoice #${inv.invoiceNumber}`,
+      status: 'COMPLETED',
+    };
+    setPaymentRecords((prev) => [payRec, ...prev]);
+    logAudit(`Invoice Payment Logged: ${inv.invoiceNumber} (${formatCurrency(paymentAmt)})`, 'invoices', inv.id);
   };
 
   // Returns
@@ -1845,6 +1989,9 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         employees,
         rolePermissions,
         currentRole,
+        currentUserRole: currentRole,
+        activeModule,
+        setActiveModule,
         auditLogs,
         notifications,
         websiteCMS,
@@ -1885,6 +2032,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         transferStock,
         addPurchase,
         receivePurchase,
+        addPurchasePayment,
         addSupplier,
         updateSupplier,
         deleteSupplier,
@@ -1896,6 +2044,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateCustomer,
         deleteCustomer,
         addCustomerPayment,
+        addInvoicePayment,
         addPaymentMethod,
         updatePaymentMethod,
         deletePaymentMethod,

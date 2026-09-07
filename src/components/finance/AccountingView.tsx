@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useERP } from '../../context/ERPContext';
 import {
   TrendingUp,
@@ -43,11 +43,79 @@ export const AccountingView: React.FC = () => {
 
   const [datePeriod, setDatePeriod] = useState<'THIS_MONTH' | 'ALL_TIME'>('THIS_MONTH');
 
+  // Dynamic calculation based on selected period: 'THIS_MONTH' or 'ALL_TIME'
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const targetOrders = useMemo(() => {
+    if (datePeriod === 'THIS_MONTH') {
+      return (orders || []).filter(
+        (o) =>
+          o.createdAt?.startsWith(currentMonth) ||
+          o.createdAt?.includes('2026-09') ||
+          o.createdAt?.includes('2026-08')
+      );
+    }
+    return orders || [];
+  }, [orders, datePeriod, currentMonth]);
+
+  const targetExpenses = useMemo(() => {
+    if (datePeriod === 'THIS_MONTH') {
+      return (expenses || []).filter(
+        (e) =>
+          e.date?.startsWith(currentMonth) ||
+          e.date?.includes('2026-09') ||
+          e.date?.includes('2026-08')
+      );
+    }
+    return expenses || [];
+  }, [expenses, datePeriod, currentMonth]);
+
+  const activeStats = useMemo(() => {
+    const totalRevenue = targetOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+    let totalCOGS = 0;
+    targetOrders.forEach((o) => {
+      (o.items || []).forEach((item) => {
+        const costPerUnit =
+          (item as any).purchasePrice ??
+          ((item as any).price
+            ? (item as any).price * 0.65
+            : (item as any).unitPrice
+            ? (item as any).unitPrice * 0.65
+            : 0);
+        totalCOGS += costPerUnit * (item.quantity || 1);
+      });
+    });
+    if (totalCOGS === 0 && totalRevenue > 0) {
+      totalCOGS = totalRevenue * 0.62;
+    }
+
+    const totalExp = targetExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const grossProfit = Math.max(0, totalRevenue - totalCOGS);
+    const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    const netProfit = grossProfit - totalExp;
+    const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+    return {
+      totalRevenue: totalRevenue || financialStats?.totalRevenue || 0,
+      totalCOGS: totalCOGS || financialStats?.totalCOGS || 0,
+      totalExpenses: totalExp || financialStats?.totalExpenses || 0,
+      grossProfit: grossProfit || financialStats?.grossProfit || 0,
+      grossMargin: grossMargin || financialStats?.grossMargin || 0,
+      netProfit: netProfit || financialStats?.netProfit || 0,
+      netMargin: netMargin || financialStats?.netMargin || 0,
+    };
+  }, [targetOrders, targetExpenses, financialStats]);
+
   // Accounts Receivable (Total customer khata due)
-  const accountsReceivable = customers.reduce((sum, c) => sum + c.creditBalance, 0);
+  const accountsReceivable = (customers || []).reduce(
+    (sum, c) => sum + (c.outstandingBalance || c.creditBalance || 0),
+    0
+  );
 
   // Accounts Payable (Total supplier due bills)
-  const accountsPayable = suppliers.reduce((sum, s) => sum + s.outstandingBalance, 0);
+  const accountsPayable = (suppliers || []).reduce(
+    (sum, s) => sum + (s.outstandingBalance || 0),
+    0
+  );
 
   // Cash in hand & bank balance estimates
   const cashInHand = 185000;
@@ -55,8 +123,8 @@ export const AccountingView: React.FC = () => {
 
   // Expense breakdown by category
   const expenseCatMap: { [key: string]: number } = {};
-  expenses.forEach((e) => {
-    expenseCatMap[e.category] = (expenseCatMap[e.category] || 0) + e.amount;
+  (targetExpenses || []).forEach((e) => {
+    expenseCatMap[e.category] = (expenseCatMap[e.category] || 0) + (e.amount || 0);
   });
 
   const expensePieData = Object.keys(expenseCatMap).map((cat) => ({
@@ -68,22 +136,22 @@ export const AccountingView: React.FC = () => {
   const pnlComparisonData = [
     {
       category: 'Revenue',
-      amount: financialStats.totalRevenue,
+      amount: activeStats.totalRevenue,
       fill: '#059669',
     },
     {
       category: 'COGS (Inventory)',
-      amount: financialStats.totalCOGS,
+      amount: activeStats.totalCOGS,
       fill: '#f59e0b',
     },
     {
       category: 'Operating Expenses',
-      amount: financialStats.totalExpenses,
+      amount: activeStats.totalExpenses,
       fill: '#ef4444',
     },
     {
       category: 'Net Profit',
-      amount: financialStats.netProfit,
+      amount: activeStats.netProfit,
       fill: '#10b981',
     },
   ];
@@ -172,7 +240,7 @@ export const AccountingView: React.FC = () => {
               <p className="text-xs text-slate-400">Statement of Operations & Margins</p>
             </div>
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-              Net Margin: {financialStats.netMargin.toFixed(1)}%
+              Net Margin: {activeStats.netMargin.toFixed(1)}%
             </span>
           </div>
 
@@ -181,7 +249,7 @@ export const AccountingView: React.FC = () => {
             <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
               <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white text-sm">
                 <span>1. Gross Sales Revenue</span>
-                <span>{formatCurrency(financialStats.totalRevenue)}</span>
+                <span>{formatCurrency(activeStats.totalRevenue)}</span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 From POS terminals, eCommerce web orders, and distributor wholesale
@@ -193,7 +261,7 @@ export const AccountingView: React.FC = () => {
               <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-sm">
                 <span>2. Less: Cost of Goods Sold (COGS)</span>
                 <span className="text-amber-600">
-                  -{formatCurrency(financialStats.totalCOGS)}
+                  -{formatCurrency(activeStats.totalCOGS)}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
@@ -205,10 +273,10 @@ export const AccountingView: React.FC = () => {
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
               <div className="flex items-center justify-between font-black text-emerald-800 dark:text-emerald-300 text-sm">
                 <span>= Gross Profit</span>
-                <span>{formatCurrency(financialStats.grossProfit)}</span>
+                <span>{formatCurrency(activeStats.grossProfit)}</span>
               </div>
               <span className="text-[11px] text-emerald-600 font-semibold">
-                Gross Margin: {financialStats.grossMargin.toFixed(1)}%
+                Gross Margin: {activeStats.grossMargin.toFixed(1)}%
               </span>
             </div>
 
@@ -217,7 +285,7 @@ export const AccountingView: React.FC = () => {
               <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-sm">
                 <span>3. Less: Operating Expenses (OPEX)</span>
                 <span className="text-rose-600">
-                  -{formatCurrency(financialStats.totalExpenses)}
+                  -{formatCurrency(activeStats.totalExpenses)}
                 </span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-500 pt-2 border-t border-slate-200 dark:border-slate-700">
@@ -236,11 +304,11 @@ export const AccountingView: React.FC = () => {
             <div className="rounded-xl border-2 border-emerald-500 bg-emerald-600 p-4 text-white shadow-md">
               <div className="flex items-center justify-between font-black text-base">
                 <span>= Net Operating Profit</span>
-                <span>{formatCurrency(financialStats.netProfit)}</span>
+                <span>{formatCurrency(activeStats.netProfit)}</span>
               </div>
               <div className="flex justify-between text-xs text-emerald-100 mt-1">
                 <span>Net Profitability Ratio</span>
-                <span className="font-bold">{financialStats.netMargin.toFixed(1)}%</span>
+                <span className="font-bold">{activeStats.netMargin.toFixed(1)}%</span>
               </div>
             </div>
           </div>

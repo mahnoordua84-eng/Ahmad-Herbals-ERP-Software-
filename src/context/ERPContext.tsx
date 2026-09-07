@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import {
   BrandSettings,
   GeneralSettings,
@@ -40,7 +40,10 @@ import {
   MarketplaceFeeConfig,
   InventoryReservation,
   ChannelHealthStatus,
+  FinancialStats,
+  OfflineSale,
 } from '../types/erp';
+import { posOfflineDB } from '../services/posOfflineDB';
 import {
   initialBrandSettings,
   initialGeneralSettings,
@@ -122,6 +125,7 @@ interface ERPContextType {
   isDarkMode: boolean;
   toggleDarkMode: () => void;
   formatCurrency: (amount: number) => string;
+  financialStats: FinancialStats;
   setCurrentRole: (role: RoleType) => void;
   hasPermission: (
     moduleOrRole: ModuleName | RoleType | string,
@@ -196,6 +200,25 @@ interface ERPContextType {
     commission?: number;
     netProfit?: number;
   }) => Order;
+  posCheckout: (saleData: {
+    customerId: string;
+    customerName?: string;
+    customerPhone?: string;
+    items: OrderItem[];
+    subtotal: number;
+    discount: number;
+    tax: number;
+    shipping: number;
+    total: number;
+    paymentMethod: string;
+    paidAmount: number;
+    warehouseId?: string;
+    notes?: string;
+    couponCode?: string;
+  }) => Promise<{ success: boolean; order: Order; invoice: Invoice; isOffline?: boolean }>;
+  syncOfflineSales: () => Promise<{ syncedCount: number; pendingCount: number }>;
+  pendingOfflineCount: number;
+  isOnline: boolean;
   updateOrderStatus: (orderId: string, status: Order['orderStatus']) => void;
   updateDeliveryStatus: (orderId: string, status: Order['deliveryStatus'], courier?: string, tracking?: string) => void;
 
@@ -298,6 +321,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const saved = localStorage.getItem('ah_erp_categories');
     return saved ? JSON.parse(saved) : initialCategories;
   });
+
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [pendingOfflineCount, setPendingOfflineCount] = useState<number>(0);
 
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('ah_erp_products');
@@ -586,6 +614,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     localStorage.setItem('ah_erp_products', JSON.stringify(products));
+    posOfflineDB.cacheProducts(products).catch(() => {});
   }, [products]);
 
   useEffect(() => {
@@ -598,6 +627,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     localStorage.setItem('ah_erp_customers', JSON.stringify(customers));
+    posOfflineDB.cacheCustomers(customers).catch(() => {});
   }, [customers]);
 
   useEffect(() => {
@@ -1000,6 +1030,284 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return newOrder;
   };
 
+  const syncOfflineSales = async (): Promise<{ syncedCount: number; pendingCount: number }> => {
+    try {
+      const pendingSales = await posOfflineDB.getPendingOfflineSales();
+      if (!pendingSales || pendingSales.length === 0) {
+        setPendingOfflineCount(0);
+        return { syncedCount: 0, pendingCount: 0 };
+      }
+
+      const resp = await fetch('/api/pos/sync-offline-sales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sales: pendingSales }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.results && Array.isArray(data.results)) {
+          for (const res of data.results) {
+            if (res.success) {
+              await posOfflineDB.markOfflineSaleSynced(
+                res.localSaleId,
+                res.orderId,
+                res.invoiceNumber
+              );
+            }
+          }
+        }
+
+        if (data.products && Array.isArray(data.products)) {
+          setProducts(data.products);
+          posOfflineDB.cacheProducts(data.products).catch(() => {});
+        }
+
+        const remaining = await posOfflineDB.getPendingOfflineSales();
+        setPendingOfflineCount(remaining.length);
+
+        if (data.syncedCount > 0) {
+          addNotification({
+            type: 'ORDER',
+            title: `Offline POS Sales Synced`,
+            message: `Successfully synchronized ${data.syncedCount} offline sale transactions to the central database.`,
+            priority: 'low',
+            linkToModule: 'orders',
+          });
+        }
+
+        return { syncedCount: data.syncedCount || 0, pendingCount: remaining.length };
+      }
+    } catch (err) {
+      console.warn('Offline sales sync failed:', err);
+    }
+    const remaining = await posOfflineDB.getPendingOfflineSales().catch(() => []);
+    setPendingOfflineCount(remaining.length);
+    return { syncedCount: 0, pendingCount: remaining.length };
+  };
+
+  const posCheckout = async (saleData: {
+    customerId: string;
+    customerName?: string;
+    customerPhone?: string;
+    items: OrderItem[];
+    subtotal: number;
+    discount: number;
+    tax: number;
+    shipping: number;
+    total: number;
+    paymentMethod: string;
+    paidAmount: number;
+    warehouseId?: string;
+    notes?: string;
+    couponCode?: string;
+  }): Promise<{ success: boolean; order: Order; invoice: Invoice; isOffline?: boolean }> => {
+    const warehouseId = saleData.warehouseId || warehouses[0]?.id || 'wh-main';
+    const cashier = `Admin (${currentRole})`;
+    const deviceId = posOfflineDB.getDeviceId();
+    const localSaleId = `pos-local-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const payload = {
+      deviceId,
+      localSaleId,
+      customerId: saleData.customerId || 'cust-walkin',
+      customerName: saleData.customerName,
+      customerPhone: saleData.customerPhone,
+      warehouseId,
+      cashier,
+      items: saleData.items,
+      subtotal: saleData.subtotal,
+      discount: saleData.discount,
+      tax: saleData.tax,
+      shipping: saleData.shipping,
+      total: saleData.total,
+      paymentMethod: saleData.paymentMethod,
+      paidAmount: saleData.paidAmount,
+      notes: saleData.notes,
+      couponCode: saleData.couponCode,
+    };
+
+    // If online, attempt central server transaction first
+    if (isOnline) {
+      try {
+        const resp = await fetch('/api/pos/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.success) {
+            // Update local state with server results
+            if (resData.updatedProducts) {
+              setProducts((prev) =>
+                prev.map((p) => {
+                  const updated = resData.updatedProducts.find((u: any) => u.id === p.id);
+                  return updated ? { ...p, stock: updated.stock } : p;
+                })
+              );
+            }
+            if (resData.order) {
+              setOrders((prev) => [resData.order, ...prev]);
+            }
+            if (resData.invoice) {
+              setInvoices((prev) => [resData.invoice, ...prev]);
+            }
+            if (resData.stockMovements) {
+              setStockMovements((prev) => [...resData.stockMovements, ...prev]);
+            }
+
+            posOfflineDB.cacheProducts(products).catch(() => {});
+
+            logAudit(
+              `POS Retail Sale #${resData.order.orderNumber} Completed`,
+              'orders',
+              resData.order.id,
+              'Draft',
+              `Total: ${formatCurrency(resData.order.total)}`
+            );
+
+            return {
+              success: true,
+              order: resData.order,
+              invoice: resData.invoice,
+              isOffline: false,
+            };
+          }
+        }
+      } catch (networkErr) {
+        console.warn('Network error during POS checkout, operating in offline fallback:', networkErr);
+      }
+    }
+
+    // Offline Mode transaction
+    const localOrderNumber = `AH-POS-OFF-${Math.floor(10000 + Math.random() * 90000)}`;
+    const invoiceNumber = `INV-${localOrderNumber}`;
+
+    const offlineOrder: Order = {
+      id: `ord-${localSaleId}`,
+      orderNumber: localOrderNumber,
+      channel: 'POS',
+      channelType: 'POS',
+      customerId: saleData.customerId,
+      customerName: saleData.customerName || 'Walk-in Customer',
+      customerPhone: saleData.customerPhone || 'In-store',
+      items: saleData.items,
+      subtotal: saleData.subtotal,
+      discount: saleData.discount,
+      tax: saleData.tax,
+      shipping: saleData.shipping,
+      total: saleData.total,
+      paidAmount: saleData.paidAmount,
+      dueAmount: Math.max(0, saleData.total - saleData.paidAmount),
+      paymentMethod: saleData.paymentMethod as any,
+      paymentStatus: saleData.paidAmount >= saleData.total ? 'PAID' : 'PARTIAL',
+      orderStatus: 'DELIVERED',
+      deliveryStatus: 'DELIVERED',
+      warehouseId,
+      notes: saleData.notes || 'Offline POS Sale (Queued for Sync)',
+      createdAt: new Date().toISOString(),
+    };
+
+    const offlineInvoice: Invoice = {
+      id: `inv-${localSaleId}`,
+      invoiceNumber,
+      orderId: offlineOrder.id,
+      orderNumber: offlineOrder.orderNumber,
+      customerId: offlineOrder.customerId,
+      customerName: offlineOrder.customerName,
+      customerPhone: offlineOrder.customerPhone,
+      items: offlineOrder.items,
+      subtotal: offlineOrder.subtotal,
+      discount: offlineOrder.discount,
+      tax: offlineOrder.tax,
+      shipping: offlineOrder.shipping,
+      total: offlineOrder.total,
+      paidAmount: offlineOrder.paidAmount,
+      dueAmount: offlineOrder.dueAmount,
+      paymentMethod: offlineOrder.paymentMethod,
+      paymentStatus: saleData.paidAmount >= saleData.total ? 'PAID' : 'PARTIAL',
+      status: saleData.paidAmount >= saleData.total ? 'PAID' : 'PARTIAL',
+      date: new Date().toISOString().split('T')[0],
+    };
+
+    // Deduct stock locally so UI updates immediately
+    setProducts((prev) =>
+      prev.map((p) => {
+        const item = saleData.items.find((it) => it.productId === p.id);
+        if (item) {
+          const newStock = Math.max(0, p.stock - item.quantity);
+          return { ...p, stock: newStock };
+        }
+        return p;
+      })
+    );
+
+    setOrders((prev) => [offlineOrder, ...prev]);
+    setInvoices((prev) => [offlineInvoice, ...prev]);
+
+    // Enqueue into IndexedDB
+    const offlineRecord: OfflineSale = {
+      localSaleId,
+      deviceId,
+      createdAt: offlineOrder.createdAt,
+      cashier,
+      customerId: saleData.customerId,
+      customerName: offlineOrder.customerName,
+      customerPhone: offlineOrder.customerPhone,
+      items: saleData.items,
+      subtotal: saleData.subtotal,
+      discount: saleData.discount,
+      tax: saleData.tax,
+      shipping: saleData.shipping,
+      total: saleData.total,
+      paymentMethod: saleData.paymentMethod,
+      paidAmount: saleData.paidAmount,
+      dueAmount: offlineOrder.dueAmount,
+      warehouseId,
+      notes: saleData.notes,
+      couponCode: saleData.couponCode,
+      synced: false,
+    };
+
+    await posOfflineDB.enqueueOfflineSale(offlineRecord);
+    setPendingOfflineCount((prev) => prev + 1);
+
+    return {
+      success: true,
+      order: offlineOrder,
+      invoice: offlineInvoice,
+      isOffline: true,
+    };
+  };
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncOfflineSales();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Initial check for pending offline sales
+    posOfflineDB.getPendingOfflineSales().then((pending) => {
+      setPendingOfflineCount(pending.length);
+      if (pending.length > 0 && navigator.onLine) {
+        syncOfflineSales();
+      }
+    }).catch(() => {});
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const updateOrderStatus = (orderId: string, status: Order['orderStatus']) => {
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, orderStatus: status } : o))
@@ -1314,14 +1622,75 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Products CRUD
-  const addProduct = (prodData: Omit<Product, 'id' | 'createdAt'>) => {
+  const addProduct = (prodData: Omit<Product, 'id' | 'createdAt'>, warehouseId = 'wh-main') => {
+    const prodId = `prod-${Date.now()}`;
+    const openingStock = Number(prodData.stock || 0);
+
     const newProd: Product = {
       ...prodData,
-      id: `prod-${Date.now()}`,
+      id: prodId,
+      stock: openingStock,
       createdAt: new Date().toISOString().split('T')[0],
+      status: prodData.status || 'active',
+      images: prodData.images || (prodData.image ? [{
+        id: `img-${Date.now()}`,
+        productId: prodId,
+        url: prodData.image,
+        filename: 'primary.jpg',
+        mimeType: 'image/jpeg',
+        size: 0,
+        sortOrder: 1,
+        isPrimary: true,
+        altText: prodData.name,
+        createdAt: new Date().toISOString(),
+      }] : []),
     };
+
     setProducts((prev) => [newProd, ...prev]);
-    logAudit(`Product Created: ${newProd.name}`, 'products', newProd.id);
+
+    // Requirement 13: Opening stock creates real inventory transaction
+    if (openingStock > 0) {
+      setWarehouseInventory((prev) => {
+        const copy = [...prev];
+        const idx = copy.findIndex((wi) => wi.productId === prodId && wi.warehouseId === warehouseId);
+        if (idx >= 0) {
+          copy[idx] = { ...copy[idx], physicalStock: copy[idx].physicalStock + openingStock };
+        } else {
+          copy.push({
+            id: `wi-${Date.now()}`,
+            warehouseId,
+            productId: prodId,
+            physicalStock: openingStock,
+            reservedStock: 0,
+            damagedStock: 0,
+          });
+        }
+        return copy;
+      });
+
+      const movement: StockMovement = {
+        id: `sm-${Date.now()}`,
+        productId: prodId,
+        productName: newProd.name,
+        warehouseId,
+        type: 'OPENING_STOCK',
+        quantity: openingStock,
+        previousStock: 0,
+        newStock: openingStock,
+        reason: `Opening Stock for ${newProd.name}`,
+        performedBy: `Admin (${currentRole})`,
+        timestamp: new Date().toISOString(),
+      };
+      setStockMovements((prev) => [movement, ...prev]);
+    }
+
+    logAudit(`Product Created: ${newProd.name} (Opening Stock: ${openingStock})`, 'products', newProd.id);
+
+    fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...newProd, openingStock, warehouseId }),
+    }).catch((err) => console.warn('Backend product persist error:', err));
   };
 
   const updateProduct = (id: string, pData: Partial<Product>) => {
@@ -1329,11 +1698,33 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       prev.map((p) => (p.id === id ? { ...p, ...pData } : p))
     );
     logAudit(`Product Updated: ${id}`, 'products', id);
+
+    fetch(`/api/products/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pData),
+    }).catch((err) => console.warn('Backend product update error:', err));
   };
 
   const deleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    logAudit(`Product Deleted: ${id}`, 'products', id);
+    // Requirement 32: Soft delete / archive if product has transactions
+    const hasOrders = orders.some((o) => o.items.some((it) => it.productId === id));
+    const hasInvoices = invoices.some((inv) => inv.items.some((it) => it.productId === id));
+    const hasMovements = stockMovements.some((sm) => sm.productId === id);
+
+    if (hasOrders || hasInvoices || hasMovements) {
+      setProducts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: 'ARCHIVED' } : p))
+      );
+      logAudit(`Product Archived (historical records preserved): ${id}`, 'products', id);
+    } else {
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      logAudit(`Product Deleted: ${id}`, 'products', id);
+    }
+
+    fetch(`/api/products/${id}`, { method: 'DELETE' }).catch((err) =>
+      console.warn('Backend delete product error:', err)
+    );
   };
 
   // Categories CRUD
@@ -1962,6 +2353,35 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setSyncLogs((prev) => [log, ...prev]);
   };
 
+  const financialStats = useMemo<FinancialStats>(() => {
+    const totalRevenue = (orders || []).reduce((sum, o) => sum + (o.total || 0), 0);
+    let totalCOGS = 0;
+    (orders || []).forEach((o) => {
+      (o.items || []).forEach((item) => {
+        const costPerUnit = (item as any).purchasePrice ?? ((item as any).price ? (item as any).price * 0.65 : ((item as any).unitPrice ? (item as any).unitPrice * 0.65 : 0));
+        totalCOGS += costPerUnit * (item.quantity || 1);
+      });
+    });
+    if (totalCOGS === 0 && totalRevenue > 0) {
+      totalCOGS = totalRevenue * 0.62;
+    }
+    const totalExpenses = (expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0);
+    const grossProfit = Math.max(0, totalRevenue - totalCOGS);
+    const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    const netProfit = grossProfit - totalExpenses;
+    const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+    return {
+      totalRevenue,
+      totalCOGS,
+      totalExpenses,
+      grossProfit,
+      grossMargin,
+      netProfit,
+      netMargin,
+    };
+  }, [orders, expenses]);
+
   return (
     <ERPContext.Provider
       value={{
@@ -2010,6 +2430,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isDarkMode,
         toggleDarkMode,
         formatCurrency,
+        financialStats,
         setCurrentRole,
         hasPermission,
         setActiveBrandId,
@@ -2038,6 +2459,10 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         deleteSupplier,
         addSupplierPayment,
         createOrder,
+        posCheckout,
+        syncOfflineSales,
+        pendingOfflineCount,
+        isOnline,
         updateOrderStatus,
         updateDeliveryStatus,
         addCustomer,

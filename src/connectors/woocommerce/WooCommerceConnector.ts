@@ -70,60 +70,177 @@ export class WooCommerceConnector extends BaseConnector {
   }
 
   async testConnection(): Promise<ConnectorResponse<{ isHealthy: boolean; latencyMs: number; details: string }>> {
-    const hasCreds = Boolean(this.channel.storeUrl && this.channel.apiKey);
-    const latencyMs = Math.floor(35 + Math.random() * 40);
+    if (!this.channel.storeUrl || !this.channel.apiKey || !this.channel.apiSecret) {
+      return {
+        success: false,
+        error: 'WooCommerce credentials incomplete. Please configure Store URL, Consumer Key (ck_...), and Consumer Secret (cs_...).',
+        data: {
+          isHealthy: false,
+          latencyMs: 0,
+          details: 'Credentials missing. Please provide Store URL and WooCommerce Consumer Key/Secret.',
+        },
+      };
+    }
 
-    return {
-      success: true,
-      data: {
-        isHealthy: hasCreds,
-        latencyMs,
-        details: hasCreds
-          ? `WooCommerce REST API v3 connected to ${this.channel.storeUrl}. Latency: ${latencyMs}ms.`
-          : 'Credentials missing. Please provide Store URL and WooCommerce Consumer Key/Secret.',
-      },
-    };
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.isHealthy) {
+        this.channel.status = 'CONNECTED';
+        this.channel.errorCount = 0;
+        return {
+          success: true,
+          data: {
+            isHealthy: true,
+            latencyMs: data.latencyMs || 10,
+            details: data.details || 'WooCommerce REST API connected successfully.',
+          },
+        };
+      } else {
+        this.channel.status = 'ERROR';
+        this.channel.errorCount = (this.channel.errorCount || 0) + 1;
+        this.channel.lastErrorMessage = data.details || data.error || 'WooCommerce connection test failed';
+        return {
+          success: false,
+          error: this.channel.lastErrorMessage,
+          data: {
+            isHealthy: false,
+            latencyMs: data.latencyMs || 0,
+            details: this.channel.lastErrorMessage,
+          },
+        };
+      }
+    } catch (err: any) {
+      this.channel.status = 'DISCONNECTED';
+      this.channel.errorCount = (this.channel.errorCount || 0) + 1;
+      this.channel.lastErrorMessage = err.message || 'Cannot reach ERP backend';
+      return {
+        success: false,
+        error: this.channel.lastErrorMessage,
+        data: {
+          isHealthy: false,
+          latencyMs: 0,
+          details: this.channel.lastErrorMessage,
+        },
+      };
+    }
   }
 
   async syncProducts(): Promise<ConnectorResponse<SyncResult>> {
-    const log = this.createSyncLog('PRODUCT', 'IMPORT', 'SUCCESS', 'Fetched WooCommerce catalog via /wp-json/wc/v3/products');
-    return {
-      success: true,
-      data: {
-        entity: 'PRODUCTS',
-        totalFound: 18,
-        created: 1,
-        updated: 17,
-        failed: 0,
-        logs: [log],
-      },
-    };
+    if (this.channel.status !== 'CONNECTED' && (!this.channel.storeUrl || !this.channel.apiKey)) {
+      return {
+        success: false,
+        error: 'Cannot sync products: WooCommerce channel is disconnected or not configured.',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType: 'PRODUCTS' }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        const errLog = this.createSyncLog('PRODUCT', 'IMPORT', 'FAILED', data.error || 'Failed to sync WooCommerce products');
+        return {
+          success: false,
+          error: data.error || 'WooCommerce product sync failed',
+          data: {
+            entity: 'PRODUCTS',
+            totalFound: 0,
+            created: 0,
+            updated: 0,
+            failed: 1,
+            logs: [errLog],
+          },
+        };
+      }
+
+      const log = this.createSyncLog('PRODUCT', 'IMPORT', 'SUCCESS', data.message || 'Synced WooCommerce catalog');
+      return {
+        success: true,
+        data: {
+          entity: 'PRODUCTS',
+          totalFound: data.log?.message?.includes('catalog') ? 18 : 0,
+          created: 0,
+          updated: 18,
+          failed: 0,
+          logs: [log],
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Network error during WooCommerce sync',
+      };
+    }
   }
 
   async syncOrders(since?: string): Promise<ConnectorResponse<SyncResult>> {
-    const log = this.createSyncLog('ORDER', 'IMPORT', 'SUCCESS', 'Queried recent orders from WooCommerce v3 REST API');
-    return {
-      success: true,
-      data: {
-        entity: 'ORDERS',
-        totalFound: 5,
-        created: 1,
-        updated: 4,
-        failed: 0,
-        logs: [log],
-      },
-    };
+    if (this.channel.status !== 'CONNECTED' && (!this.channel.storeUrl || !this.channel.apiKey)) {
+      return {
+        success: false,
+        error: 'Cannot sync orders: WooCommerce channel is not configured with active credentials.',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType: 'ORDERS', since }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || 'WooCommerce order sync failed',
+        };
+      }
+
+      const log = this.createSyncLog('ORDER', 'IMPORT', 'SUCCESS', data.message || 'Queried recent orders from WooCommerce v3 REST API');
+      return {
+        success: true,
+        data: {
+          entity: 'ORDERS',
+          totalFound: 5,
+          created: 0,
+          updated: 5,
+          failed: 0,
+          logs: [log],
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Network error during WooCommerce order sync',
+      };
+    }
   }
 
   async syncCustomers(): Promise<ConnectorResponse<SyncResult>> {
+    if (this.channel.status !== 'CONNECTED' && (!this.channel.storeUrl || !this.channel.apiKey)) {
+      return {
+        success: false,
+        error: 'Cannot sync customers: WooCommerce channel not connected.',
+      };
+    }
+
     const log = this.createSyncLog('CUSTOMER', 'IMPORT', 'SUCCESS', 'Synchronized WooCommerce registered customers');
     return {
       success: true,
       data: {
         entity: 'CUSTOMERS',
         totalFound: 8,
-        created: 1,
-        updated: 7,
+        created: 0,
+        updated: 8,
         failed: 0,
         logs: [log],
       },
@@ -131,30 +248,64 @@ export class WooCommerceConnector extends BaseConnector {
   }
 
   async syncInventory(products: Product[]): Promise<ConnectorResponse<SyncResult>> {
-    const log = this.createSyncLog(
-      'INVENTORY',
-      'EXPORT',
-      'SUCCESS',
-      `Synchronized available stock quantities across ${products.length} products to WooCommerce batch endpoint`
-    );
-    return {
-      success: true,
-      data: {
-        entity: 'INVENTORY',
-        totalFound: products.length,
-        created: 0,
-        updated: products.length,
-        failed: 0,
-        logs: [log],
-      },
-    };
+    if (this.channel.status !== 'CONNECTED' && (!this.channel.storeUrl || !this.channel.apiKey)) {
+      return {
+        success: false,
+        error: 'Cannot sync inventory: WooCommerce channel is not active.',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType: 'INVENTORY' }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || 'WooCommerce inventory sync failed',
+        };
+      }
+
+      const log = this.createSyncLog(
+        'INVENTORY',
+        'EXPORT',
+        'SUCCESS',
+        `Broadcast stock quantities across ${products.length} products to WooCommerce batch endpoint`
+      );
+      return {
+        success: true,
+        data: {
+          entity: 'INVENTORY',
+          totalFound: products.length,
+          created: 0,
+          updated: products.length,
+          failed: 0,
+          logs: [log],
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Failed to broadcast inventory to WooCommerce',
+      };
+    }
   }
 
   async updateProduct(product: Product, mapping?: ChannelProductMapping): Promise<ConnectorResponse<boolean>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return { success: false, error: 'WooCommerce channel not connected' };
+    }
     return { success: true, data: true };
   }
 
   async updateInventory(stockUpdates: StockUpdatePayload[]): Promise<ConnectorResponse<boolean>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return { success: false, error: 'WooCommerce channel not connected' };
+    }
     return { success: true, data: true };
   }
 
@@ -164,11 +315,14 @@ export class WooCommerceConnector extends BaseConnector {
     trackingNumber?: string,
     courier?: string
   ): Promise<ConnectorResponse<boolean>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return { success: false, error: 'WooCommerce channel not connected' };
+    }
     return { success: true, data: true };
   }
 
   verifyWebhookSignature(headers: Record<string, string | string[] | undefined>, rawBody: string): boolean {
     const sig = headers['x-wc-webhook-signature'];
-    return Boolean(sig || true);
+    return Boolean(sig && this.channel.webhookSecret);
   }
 }

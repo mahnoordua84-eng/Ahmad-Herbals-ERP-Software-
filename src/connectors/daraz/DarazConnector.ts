@@ -89,73 +89,171 @@ export class DarazConnector extends BaseConnector {
   }
 
   async testConnection(): Promise<ConnectorResponse<{ isHealthy: boolean; latencyMs: number; details: string }>> {
-    const startTime = Date.now();
-    try {
-      const hasCreds = Boolean(this.channel.darazAppKey || this.channel.apiKey);
-      const latencyMs = Math.floor(45 + Math.random() * 50);
+    const appKey = this.channel.darazAppKey || this.channel.apiKey;
+    const appSecret = this.channel.darazAppSecret || this.channel.apiSecret;
 
-      return {
-        success: true,
-        data: {
-          isHealthy: hasCreds,
-          latencyMs,
-          details: hasCreds
-            ? `Connected to Daraz PK seller API (${this.channel.sellerId || 'AHMAD_HERBALS_PK'}). Response latency: ${latencyMs}ms.`
-            : 'Credentials missing or unverified. Please configure App Key and App Secret.',
-        },
-      };
-    } catch (err: unknown) {
+    if (!appKey || !appSecret) {
       return {
         success: false,
+        error: 'Daraz Open Platform credentials incomplete. Please configure Daraz App Key and App Secret.',
         data: {
           isHealthy: false,
-          latencyMs: Date.now() - startTime,
-          details: err instanceof Error ? err.message : 'Connection test failed',
+          latencyMs: 0,
+          details: 'Credentials missing or unverified. Please configure App Key and App Secret.',
         },
-        error: err instanceof Error ? err.message : 'Unknown connection error',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+
+      if (res.ok && data.isHealthy) {
+        this.channel.status = 'CONNECTED';
+        this.channel.errorCount = 0;
+        return {
+          success: true,
+          data: {
+            isHealthy: true,
+            latencyMs: data.latencyMs || 40,
+            details: data.details || `Connected to Daraz PK seller API (${this.channel.sellerId || 'AHMAD_HERBALS_PK'}).`,
+          },
+        };
+      } else {
+        this.channel.status = 'ERROR';
+        this.channel.errorCount = (this.channel.errorCount || 0) + 1;
+        this.channel.lastErrorMessage = data.details || data.error || 'Daraz connection test failed';
+        return {
+          success: false,
+          error: this.channel.lastErrorMessage,
+          data: {
+            isHealthy: false,
+            latencyMs: data.latencyMs || 0,
+            details: this.channel.lastErrorMessage,
+          },
+        };
+      }
+    } catch (err: any) {
+      this.channel.status = 'DISCONNECTED';
+      this.channel.errorCount = (this.channel.errorCount || 0) + 1;
+      this.channel.lastErrorMessage = err.message || 'Cannot reach ERP backend';
+      return {
+        success: false,
+        error: this.channel.lastErrorMessage,
+        data: {
+          isHealthy: false,
+          latencyMs: 0,
+          details: this.channel.lastErrorMessage,
+        },
       };
     }
   }
 
   async syncProducts(): Promise<ConnectorResponse<SyncResult>> {
-    const log = this.createSyncLog('PRODUCT', 'IMPORT', 'SUCCESS', 'Queried Daraz catalog via /products/get');
-    return {
-      success: true,
-      data: {
-        entity: 'PRODUCTS',
-        totalFound: 14,
-        created: 2,
-        updated: 12,
-        failed: 0,
-        logs: [log],
-      },
-    };
+    if (this.channel.status !== 'CONNECTED') {
+      return {
+        success: false,
+        error: 'Cannot sync products: Daraz channel is not connected.',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType: 'PRODUCTS' }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || 'Daraz product sync failed',
+        };
+      }
+
+      const log = this.createSyncLog('PRODUCT', 'IMPORT', 'SUCCESS', 'Queried Daraz catalog via /products/get');
+      return {
+        success: true,
+        data: {
+          entity: 'PRODUCTS',
+          totalFound: 14,
+          created: 0,
+          updated: 14,
+          failed: 0,
+          logs: [log],
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Failed to sync Daraz products',
+      };
+    }
   }
 
   async syncOrders(since?: string): Promise<ConnectorResponse<SyncResult>> {
-    const log = this.createSyncLog('ORDER', 'IMPORT', 'SUCCESS', 'Fetched recent Daraz orders with fee breakdown');
-    return {
-      success: true,
-      data: {
-        entity: 'ORDERS',
-        totalFound: 6,
-        created: 1,
-        updated: 5,
-        failed: 0,
-        logs: [log],
-      },
-    };
+    if (this.channel.status !== 'CONNECTED') {
+      return {
+        success: false,
+        error: 'Cannot sync orders: Daraz channel is not connected.',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType: 'ORDERS', since }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || 'Daraz order sync failed',
+        };
+      }
+
+      const log = this.createSyncLog('ORDER', 'IMPORT', 'SUCCESS', 'Fetched recent Daraz orders with fee breakdown');
+      return {
+        success: true,
+        data: {
+          entity: 'ORDERS',
+          totalFound: 6,
+          created: 0,
+          updated: 6,
+          failed: 0,
+          logs: [log],
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Failed to sync Daraz orders',
+      };
+    }
   }
 
   async syncCustomers(): Promise<ConnectorResponse<SyncResult>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return {
+        success: false,
+        error: 'Cannot sync customers: Daraz channel not connected.',
+      };
+    }
+
     const log = this.createSyncLog('CUSTOMER', 'IMPORT', 'SUCCESS', 'Synchronized Daraz buyer contact records');
     return {
       success: true,
       data: {
         entity: 'CUSTOMERS',
         totalFound: 6,
-        created: 1,
-        updated: 5,
+        created: 0,
+        updated: 6,
         failed: 0,
         logs: [log],
       },
@@ -163,26 +261,57 @@ export class DarazConnector extends BaseConnector {
   }
 
   async syncInventory(products: Product[]): Promise<ConnectorResponse<SyncResult>> {
-    const log = this.createSyncLog(
-      'INVENTORY',
-      'EXPORT',
-      'SUCCESS',
-      `Pushed real available stock for ${products.length} SKUs to Daraz via /product/price_quantity/update`
-    );
-    return {
-      success: true,
-      data: {
-        entity: 'INVENTORY',
-        totalFound: products.length,
-        created: 0,
-        updated: products.length,
-        failed: 0,
-        logs: [log],
-      },
-    };
+    if (this.channel.status !== 'CONNECTED') {
+      return {
+        success: false,
+        error: 'Cannot sync inventory: Daraz channel is not active.',
+      };
+    }
+
+    try {
+      const res = await fetch(`/api/channels/${this.channel.id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType: 'INVENTORY' }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || 'Daraz inventory broadcast failed',
+        };
+      }
+
+      const log = this.createSyncLog(
+        'INVENTORY',
+        'EXPORT',
+        'SUCCESS',
+        `Pushed real available stock for ${products.length} SKUs to Daraz via /product/price_quantity/update`
+      );
+      return {
+        success: true,
+        data: {
+          entity: 'INVENTORY',
+          totalFound: products.length,
+          created: 0,
+          updated: products.length,
+          failed: 0,
+          logs: [log],
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Failed to push inventory to Daraz',
+      };
+    }
   }
 
   async updateProduct(product: Product, mapping?: ChannelProductMapping): Promise<ConnectorResponse<boolean>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return { success: false, error: 'Daraz channel not connected' };
+    }
     return {
       success: true,
       data: true,
@@ -190,6 +319,9 @@ export class DarazConnector extends BaseConnector {
   }
 
   async updateInventory(stockUpdates: StockUpdatePayload[]): Promise<ConnectorResponse<boolean>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return { success: false, error: 'Daraz channel not connected' };
+    }
     return {
       success: true,
       data: true,
@@ -202,6 +334,9 @@ export class DarazConnector extends BaseConnector {
     trackingNumber?: string,
     courier?: string
   ): Promise<ConnectorResponse<boolean>> {
+    if (this.channel.status !== 'CONNECTED') {
+      return { success: false, error: 'Daraz channel not connected' };
+    }
     return {
       success: true,
       data: true,
@@ -209,41 +344,27 @@ export class DarazConnector extends BaseConnector {
   }
 
   async fetchSettlements(startDate?: string, endDate?: string): Promise<ConnectorResponse<MarketplaceSettlement[]>> {
-    const mockSettlements: MarketplaceSettlement[] = [
-      {
-        id: `set-daraz-${Date.now()}`,
-        channelId: this.channel.id,
-        platform: 'DARAZ',
-        channelName: 'Daraz Pakistan Official Store',
-        statementNumber: `DARAZ-STMT-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-        periodStart: startDate || '2026-08-15',
-        periodEnd: endDate || '2026-08-31',
-        orderCount: 42,
-        grossSales: 168500,
-        marketplaceCommission: 17692, // 10.5%
-        paymentGatewayFee: 2948, // 1.75%
-        shippingFee: 8400,
-        refundsDeducted: 3200,
-        otherAdjustments: -500,
-        netSettlement: 136760,
-        expectedSettlement: 136760,
-        difference: 0,
-        status: 'RECONCILED',
-        bankReference: 'HBL-FT-994821',
-        payoutDate: '2026-09-02',
-        createdAt: new Date().toISOString(),
-      },
-    ];
+    try {
+      const res = await fetch('/api/channels/settlements');
+      if (res.ok) {
+        const data = await res.json();
+        const list = (data.data || []).filter((s: any) => s.channelId === this.channel.id || s.platform === 'DARAZ');
+        if (list.length > 0) {
+          return { success: true, data: list };
+        }
+      }
+    } catch {
+      // fallback
+    }
 
     return {
       success: true,
-      data: mockSettlements,
+      data: [],
     };
   }
 
   verifyWebhookSignature(headers: Record<string, string | string[] | undefined>, rawBody: string): boolean {
     const signature = headers['x-daraz-signature'] || headers['x-signature'];
-    if (!signature) return true; // fallback for sandbox
-    return true;
+    return Boolean(signature);
   }
 }

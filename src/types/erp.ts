@@ -187,6 +187,21 @@ export interface ProductVariation {
   stock: number;
 }
 
+export interface ProductImage {
+  id: string;
+  productId?: string;
+  url: string;
+  filename?: string;
+  mimeType?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  sortOrder: number;
+  isPrimary: boolean;
+  altText?: string;
+  createdAt?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -214,7 +229,8 @@ export interface Product {
   supplierId?: string;
   image: string;
   gallery: string[];
-  status: 'active' | 'inactive' | 'draft';
+  images?: ProductImage[];
+  status: 'active' | 'inactive' | 'draft' | 'ARCHIVED' | 'ACTIVE' | 'INACTIVE';
   featured: boolean;
   bestseller: boolean;
   isNew: boolean;
@@ -278,6 +294,7 @@ export type StockMovementType =
   | 'ADJUSTMENT'
   | 'TRANSFER'
   | 'OPENING'
+  | 'OPENING_STOCK'
   | 'PRODUCTION'
   | 'STOCK_IN' 
   | 'STOCK_OUT' 
@@ -401,13 +418,47 @@ export interface CustomerLedgerEntry {
 export interface OrderItem {
   productId: string;
   productName: string;
+  productNameSnapshot?: string;
+  sku?: string;
+  skuSnapshot?: string;
   variationId?: string;
   unitWeight?: string;
+  unit?: string;
   price: number;
+  unitPrice?: number;
   purchasePrice: number; // For exact COGS and profit computation
+  costPrice?: number;
   quantity: number;
   discount: number;
+  tax?: number;
   total: number;
+  image?: string;
+}
+
+export interface OfflineSale {
+  localSaleId: string;
+  deviceId: string;
+  createdAt: string;
+  cashier: string;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  items: OrderItem[];
+  subtotal: number;
+  discount: number;
+  tax: number;
+  shipping: number;
+  total: number;
+  paymentMethod: string;
+  paidAmount: number;
+  dueAmount: number;
+  warehouseId: string;
+  notes?: string;
+  couponCode?: string;
+  synced: boolean;
+  syncedAt?: string;
+  serverOrderId?: string;
+  serverInvoiceNumber?: string;
 }
 
 export type OrderStatus =
@@ -846,5 +897,15 @@ export interface ChannelHealthStatus {
   lastHeartbeat: string;
   lastSync: string;
   errorSnippet?: string;
+}
+
+export interface FinancialStats {
+  totalRevenue: number;
+  totalCOGS: number;
+  totalExpenses: number;
+  grossProfit: number;
+  grossMargin: number;
+  netProfit: number;
+  netMargin: number;
 }
 

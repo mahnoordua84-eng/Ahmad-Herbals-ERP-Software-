@@ -35,6 +35,14 @@ import {
   initialFeeConfigs,
   initialReservations,
 } from './src/data/seedData';
+import {
+  initialBusinessProfile,
+  initialBranches,
+  initialUnitsOfMeasure,
+  initialProductAttributes,
+  initialCustomFields,
+} from './src/data/seedMasterData';
+import { UNIVERSAL_BUSINESS_TEMPLATES } from './src/data/businessTemplates';
 
 const app = express();
 const PORT = 3000;
@@ -49,6 +57,13 @@ const DB_FILE_PATH = path.join(DATA_DIR, 'erp-database.json');
 
 function initializeDefaultDatabase() {
   return {
+    businessProfile: { ...initialBusinessProfile },
+    businessType: 'auto_parts',
+    branches: [...initialBranches],
+    units: [...initialUnitsOfMeasure],
+    attributes: [...initialProductAttributes],
+    customFields: [...initialCustomFields],
+    businessTemplates: [...UNIVERSAL_BUSINESS_TEMPLATES],
     brandSettings: { ...initialBrandSettings },
     generalSettings: { ...initialGeneralSettings },
     brands: [...initialBrands],
@@ -141,25 +156,35 @@ function initializeDefaultDatabase() {
 
 // Load database from disk or initialize with seed defaults
 function loadDatabase() {
+  const defaults = initializeDefaultDatabase();
   try {
     if (fs.existsSync(DB_FILE_PATH)) {
       const raw = fs.readFileSync(DB_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
-      console.log('[Ahmad Herbals ERP] Persistent database loaded from disk.');
-      return parsed;
+      console.log('[Universal ERP] Persistent database loaded from disk.');
+      // Gracefully merge any newly added master data arrays/objects
+      const merged = { ...defaults, ...parsed };
+      if (!merged.businessProfile) merged.businessProfile = { ...initialBusinessProfile };
+      if (!merged.businessType) merged.businessType = 'auto_parts';
+      if (!merged.branches || merged.branches.length === 0) merged.branches = [...initialBranches];
+      if (!merged.units || merged.units.length === 0) merged.units = [...initialUnitsOfMeasure];
+      if (!merged.attributes || merged.attributes.length === 0) merged.attributes = [...initialProductAttributes];
+      if (!merged.customFields || merged.customFields.length === 0) merged.customFields = [...initialCustomFields];
+      if (!merged.businessTemplates || merged.businessTemplates.length === 0) merged.businessTemplates = [...UNIVERSAL_BUSINESS_TEMPLATES];
+      return merged;
     }
   } catch (err) {
-    console.error('[Ahmad Herbals ERP] Error loading database from disk, fallback to seeds:', err);
+    console.error('[Universal ERP] Error loading database from disk, fallback to seeds:', err);
   }
-  const freshDb = initializeDefaultDatabase();
+  const freshDb = defaults;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(DB_FILE_PATH, JSON.stringify(freshDb, null, 2), 'utf-8');
-    console.log('[Ahmad Herbals ERP] Initial database seeded and persisted to disk.');
+    console.log('[Universal ERP] Initial database seeded and persisted to disk.');
   } catch (err) {
-    console.error('[Ahmad Herbals ERP] Error writing initial database file:', err);
+    console.error('[Universal ERP] Error writing initial database file:', err);
   }
   return freshDb;
 }
@@ -1713,6 +1738,801 @@ app.post('/api/backup/restore', (req, res) => {
   }
 
   res.json({ success: true, message: 'Database state restored successfully' });
+});
+
+// ============================================================================
+// 14. UNIVERSAL MULTI-BUSINESS MASTER CONFIGURATION APIS
+// ============================================================================
+
+// --- 14.1 BUSINESS PROFILE & ACTIVE TYPE ---
+app.get('/api/business/profile', (req, res) => {
+  res.json({
+    success: true,
+    profile: db.businessProfile || initialBusinessProfile,
+    businessType: db.businessType || 'auto_parts',
+  });
+});
+
+app.put('/api/business/profile', (req, res) => {
+  const oldProfile = { ...db.businessProfile };
+  db.businessProfile = { ...db.businessProfile, ...req.body };
+
+  // Synchronize legacy brandSettings & generalSettings for backward compatibility
+  if (req.body.businessName) {
+    if (db.brandSettings) db.brandSettings.companyName = req.body.businessName;
+    if (db.generalSettings) db.generalSettings.businessName = req.body.businessName;
+  }
+  if (req.body.currency && db.generalSettings) db.generalSettings.currency = req.body.currency;
+  if (req.body.currencySymbol && db.generalSettings) db.generalSettings.currencySymbol = req.body.currencySymbol;
+  if (req.body.phone && db.brandSettings) db.brandSettings.phone = req.body.phone;
+  if (req.body.email && db.brandSettings) db.brandSettings.email = req.body.email;
+  if (req.body.address && db.brandSettings) db.brandSettings.address = req.body.address;
+  if (req.body.logo && db.brandSettings) db.brandSettings.logo = req.body.logo;
+
+  persistDb();
+  logServerAudit('Updated Business Profile', 'settings', 'business-profile', 'Admin User');
+  res.json({ success: true, profile: db.businessProfile });
+});
+
+app.get('/api/business/type', (req, res) => {
+  res.json({
+    businessType: db.businessType || 'auto_parts',
+    profile: db.businessProfile,
+  });
+});
+
+// Switch business template (Zero data loss: never deletes existing products or orders!)
+app.post('/api/business/switch-template', (req, res) => {
+  const { businessType, mergeCategories = true, mergeAttributes = true, mergeUnits = true } = req.body;
+
+  if (!businessType) {
+    return res.status(400).json({ error: 'businessType is required' });
+  }
+
+  const previousType = db.businessType;
+  db.businessType = businessType;
+  if (db.businessProfile) {
+    db.businessProfile.businessType = businessType;
+  }
+
+  const template = UNIVERSAL_BUSINESS_TEMPLATES.find((t) => t.type === businessType);
+  let categoriesAdded = 0;
+  let attributesAdded = 0;
+  let unitsAdded = 0;
+
+  if (template) {
+    // 1. Merge recommended categories if requested
+    if (mergeCategories && template.recommendedCategories) {
+      if (!db.categories) db.categories = [];
+      template.recommendedCategories.forEach((rc, idx) => {
+        const exists = db.categories.some(
+          (c: any) => c.name.toLowerCase() === rc.name.toLowerCase() || (rc.slug && c.slug === rc.slug)
+        );
+        if (!exists) {
+          const parentId = `cat-${Date.now()}-${idx}`;
+          db.categories.push({
+            id: parentId,
+            name: rc.name,
+            slug: rc.slug || rc.name.toLowerCase().replace(/\s+/g, '-'),
+            businessTypeId: businessType,
+            status: 'active',
+            order: db.categories.length + 1,
+            description: rc.description || `Category for ${template.name}`,
+          });
+          categoriesAdded++;
+
+          // Add subcategories if present
+          if (rc.subcategories && Array.isArray(rc.subcategories)) {
+            rc.subcategories.forEach((subName, subIdx) => {
+              db.categories.push({
+                id: `cat-sub-${Date.now()}-${idx}-${subIdx}`,
+                name: subName,
+                slug: `${rc.slug || 'cat'}-${subName.toLowerCase().replace(/\s+/g, '-')}`,
+                parentId,
+                businessTypeId: businessType,
+                status: 'active',
+                order: subIdx + 1,
+                description: `Subcategory under ${rc.name}`,
+              });
+              categoriesAdded++;
+            });
+          }
+        }
+      });
+    }
+
+    // 2. Merge recommended attributes if requested
+    if (mergeAttributes && template.recommendedAttributes) {
+      if (!db.attributes) db.attributes = [];
+      template.recommendedAttributes.forEach((ra) => {
+        const exists = db.attributes.some(
+          (a: any) => a.code === ra.code && (a.businessTypeId === businessType || !a.businessTypeId)
+        );
+        if (!exists) {
+          db.attributes.push({
+            id: `attr-${ra.code}-${Date.now()}`,
+            name: ra.name,
+            code: ra.code,
+            type: ra.type,
+            values: ra.values || [],
+            target: 'business_type',
+            businessTypeId: businessType,
+            isRequired: false,
+            showInPOS: Boolean(ra.showInPOS),
+            showInInvoice: Boolean(ra.showInInvoice),
+            status: 'active',
+          });
+          attributesAdded++;
+        }
+      });
+    }
+
+    // 3. Merge recommended units if requested
+    if (mergeUnits && template.recommendedUnits) {
+      if (!db.units) db.units = [];
+      template.recommendedUnits.forEach((ru) => {
+        const exists = db.units.some(
+          (u: any) => u.code.toLowerCase() === ru.code.toLowerCase() || u.name.toLowerCase() === ru.name.toLowerCase()
+        );
+        if (!exists) {
+          db.units.push({
+            id: `u-${ru.code}-${Date.now()}`,
+            name: ru.name,
+            code: ru.code,
+            symbol: ru.symbol,
+            status: 'active',
+            isDefault: false,
+          });
+          unitsAdded++;
+        }
+      });
+    }
+  }
+
+  persistDb();
+  logServerAudit(
+    `Switched business template from ${previousType} to ${businessType} (Added ${categoriesAdded} categories, ${attributesAdded} attributes, ${unitsAdded} units). Zero data loss verified.`,
+    'business',
+    businessType,
+    'Admin User'
+  );
+
+  res.json({
+    success: true,
+    message: `Switched business template to ${template?.name || businessType}. Existing products & transactions preserved.`,
+    businessType,
+    categoriesAdded,
+    attributesAdded,
+    unitsAdded,
+  });
+});
+
+// --- 14.2 TEMPLATES CRUD & CLONING ---
+app.get('/api/business/templates', (req, res) => {
+  res.json({
+    success: true,
+    data: db.businessTemplates || UNIVERSAL_BUSINESS_TEMPLATES,
+    total: (db.businessTemplates || UNIVERSAL_BUSINESS_TEMPLATES).length,
+  });
+});
+
+app.post('/api/business/templates', (req, res) => {
+  const tpl = {
+    ...req.body,
+    id: req.body.id || `tpl-custom-${Date.now()}`,
+    isCustom: true,
+    createdAt: new Date().toISOString(),
+  };
+  if (!db.businessTemplates) db.businessTemplates = [...UNIVERSAL_BUSINESS_TEMPLATES];
+  db.businessTemplates.push(tpl);
+  persistDb();
+  logServerAudit(`Created custom business template: ${tpl.name}`, 'templates', tpl.id);
+  res.status(201).json({ success: true, template: tpl });
+});
+
+app.post('/api/business/templates/clone', (req, res) => {
+  const { sourceTemplateId, newName, newType } = req.body;
+  const source = (db.businessTemplates || UNIVERSAL_BUSINESS_TEMPLATES).find((t: any) => t.id === sourceTemplateId);
+  if (!source) return res.status(404).json({ error: 'Source template not found' });
+
+  const cloned = {
+    ...JSON.parse(JSON.stringify(source)),
+    id: `tpl-${Date.now()}`,
+    name: newName || `${source.name} (Copy)`,
+    type: newType || `${source.type}_copy`,
+    badge: 'CUSTOM',
+    isCustom: true,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (!db.businessTemplates) db.businessTemplates = [...UNIVERSAL_BUSINESS_TEMPLATES];
+  db.businessTemplates.push(cloned);
+  persistDb();
+  logServerAudit(`Cloned template ${source.name} into ${cloned.name}`, 'templates', cloned.id);
+  res.status(201).json({ success: true, template: cloned });
+});
+
+app.put('/api/business/templates/:id', (req, res) => {
+  const { id } = req.params;
+  if (!db.businessTemplates) db.businessTemplates = [...UNIVERSAL_BUSINESS_TEMPLATES];
+  const idx = db.businessTemplates.findIndex((t: any) => t.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Template not found' });
+
+  db.businessTemplates[idx] = { ...db.businessTemplates[idx], ...req.body, updatedAt: new Date().toISOString() };
+  persistDb();
+  logServerAudit(`Updated business template: ${db.businessTemplates[idx].name}`, 'templates', id);
+  res.json({ success: true, template: db.businessTemplates[idx] });
+});
+
+app.delete('/api/business/templates/:id', (req, res) => {
+  const { id } = req.params;
+  if (!db.businessTemplates) db.businessTemplates = [...UNIVERSAL_BUSINESS_TEMPLATES];
+  const idx = db.businessTemplates.findIndex((t: any) => t.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Template not found' });
+
+  if (db.businessType === db.businessTemplates[idx].type) {
+    return res.status(400).json({ error: 'Cannot delete the currently active business template. Switch to another template first.' });
+  }
+
+  const deleted = db.businessTemplates.splice(idx, 1)[0];
+  persistDb();
+  logServerAudit(`Deleted business template: ${deleted.name}`, 'templates', id);
+  res.json({ success: true, message: 'Template removed successfully' });
+});
+
+// --- 14.3 BRANCHES (CRUD, ARCHIVE, RESTORE, SAFE DELETE) ---
+app.get('/api/branches', (req, res) => {
+  res.json({ success: true, data: db.branches || [], total: db.branches?.length || 0 });
+});
+
+app.post('/api/branches', (req, res) => {
+  const branchData = req.body;
+  const newBranch = {
+    ...branchData,
+    id: branchData.id || `br-${Date.now()}`,
+    code: branchData.code || `BR-${Math.floor(100 + Math.random() * 900)}`,
+    status: branchData.status || 'active',
+    openingDate: branchData.openingDate || new Date().toISOString().split('T')[0],
+  };
+
+  if (!db.branches) db.branches = [];
+  db.branches.push(newBranch);
+  persistDb();
+  logServerAudit(`Created branch: ${newBranch.name} (${newBranch.code})`, 'branches', newBranch.id);
+  res.status(201).json({ success: true, branch: newBranch });
+});
+
+app.put('/api/branches/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.branches?.findIndex((b: any) => b.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Branch not found' });
+
+  db.branches[idx] = { ...db.branches[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated branch: ${db.branches[idx].name}`, 'branches', id);
+  res.json({ success: true, branch: db.branches[idx] });
+});
+
+app.put('/api/branches/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const branch = db.branches?.find((b: any) => b.id === id);
+  if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+  branch.status = 'archived';
+  persistDb();
+  logServerAudit(`Archived branch: ${branch.name}`, 'branches', id);
+  res.json({ success: true, branch });
+});
+
+app.put('/api/branches/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const branch = db.branches?.find((b: any) => b.id === id);
+  if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+  branch.status = 'active';
+  persistDb();
+  logServerAudit(`Restored branch: ${branch.name}`, 'branches', id);
+  res.json({ success: true, branch });
+});
+
+app.delete('/api/branches/:id', (req, res) => {
+  const { id } = req.params;
+  const branch = db.branches?.find((b: any) => b.id === id);
+  if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+  // Safe delete check: Warehouses linked
+  const linkedWarehouses = db.warehouses?.filter((w: any) => w.branchId === id) || [];
+  const linkedEmployees = db.employees?.filter((e: any) => e.branchId === id) || [];
+  const linkedOrders = db.orders?.filter((o: any) => o.branchId === id) || [];
+
+  if (linkedWarehouses.length > 0 || linkedEmployees.length > 0 || linkedOrders.length > 0) {
+    return res.status(400).json({
+      error: `Cannot delete branch '${branch.name}'. It is linked to ${linkedWarehouses.length} warehouse(s), ${linkedEmployees.length} employee(s), and ${linkedOrders.length} historical order(s). Please archive this branch instead to maintain data integrity.`,
+      canArchive: true,
+    });
+  }
+
+  db.branches = db.branches.filter((b: any) => b.id !== id);
+  persistDb();
+  logServerAudit(`Deleted branch permanently: ${branch.name}`, 'branches', id);
+  res.json({ success: true, message: 'Branch deleted permanently' });
+});
+
+// --- 14.4 WAREHOUSES (CRUD, ARCHIVE, RESTORE, SAFE DELETE) ---
+app.get('/api/warehouses', (req, res) => {
+  res.json({ success: true, data: db.warehouses || [], total: db.warehouses?.length || 0 });
+});
+
+app.post('/api/warehouses', (req, res) => {
+  const wData = req.body;
+  const newWarehouse = {
+    ...wData,
+    id: wData.id || `wh-${Date.now()}`,
+    code: wData.code || `WH-${Math.floor(100 + Math.random() * 900)}`,
+    status: wData.status || 'active',
+  };
+
+  if (!db.warehouses) db.warehouses = [];
+  db.warehouses.push(newWarehouse);
+  persistDb();
+  logServerAudit(`Created warehouse: ${newWarehouse.name}`, 'warehouses', newWarehouse.id);
+  res.status(201).json({ success: true, warehouse: newWarehouse });
+});
+
+app.put('/api/warehouses/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.warehouses?.findIndex((w: any) => w.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Warehouse not found' });
+
+  db.warehouses[idx] = { ...db.warehouses[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated warehouse: ${db.warehouses[idx].name}`, 'warehouses', id);
+  res.json({ success: true, warehouse: db.warehouses[idx] });
+});
+
+app.put('/api/warehouses/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const w = db.warehouses?.find((wh: any) => wh.id === id);
+  if (!w) return res.status(404).json({ error: 'Warehouse not found' });
+
+  w.status = 'archived';
+  persistDb();
+  logServerAudit(`Archived warehouse: ${w.name}`, 'warehouses', id);
+  res.json({ success: true, warehouse: w });
+});
+
+app.put('/api/warehouses/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const w = db.warehouses?.find((wh: any) => wh.id === id);
+  if (!w) return res.status(404).json({ error: 'Warehouse not found' });
+
+  w.status = 'active';
+  persistDb();
+  logServerAudit(`Restored warehouse: ${w.name}`, 'warehouses', id);
+  res.json({ success: true, warehouse: w });
+});
+
+app.delete('/api/warehouses/:id', (req, res) => {
+  const { id } = req.params;
+  const w = db.warehouses?.find((wh: any) => wh.id === id);
+  if (!w) return res.status(404).json({ error: 'Warehouse not found' });
+
+  // Safe delete check: active inventory
+  const activeStock = db.warehouseInventory?.filter((wi: any) => wi.warehouseId === id && wi.physicalStock > 0) || [];
+  const linkedMovements = db.stockMovements?.filter((sm: any) => sm.warehouseId === id) || [];
+
+  if (activeStock.length > 0 || linkedMovements.length > 0) {
+    return res.status(400).json({
+      error: `Cannot delete warehouse '${w.name}'. It contains active inventory (${activeStock.length} items with stock > 0) or historical stock movements (${linkedMovements.length}). Please archive it instead.`,
+      canArchive: true,
+    });
+  }
+
+  db.warehouses = db.warehouses.filter((wh: any) => wh.id !== id);
+  persistDb();
+  logServerAudit(`Deleted warehouse permanently: ${w.name}`, 'warehouses', id);
+  res.json({ success: true, message: 'Warehouse deleted permanently' });
+});
+
+// --- 14.5 BRANDS (CRUD, ARCHIVE, RESTORE, SAFE DELETE) ---
+app.get('/api/brands', (req, res) => {
+  res.json({ success: true, data: db.brands || [], total: db.brands?.length || 0 });
+});
+
+app.post('/api/brands', (req, res) => {
+  const bData = req.body;
+  const newBrand = {
+    ...bData,
+    id: bData.id || `brand-${Date.now()}`,
+    status: bData.status || 'active',
+    createdAt: new Date().toISOString(),
+  };
+
+  if (!db.brands) db.brands = [];
+  db.brands.push(newBrand);
+  persistDb();
+  logServerAudit(`Created brand: ${newBrand.name}`, 'brands', newBrand.id);
+  res.status(201).json({ success: true, brand: newBrand });
+});
+
+app.put('/api/brands/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.brands?.findIndex((b: any) => b.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Brand not found' });
+
+  db.brands[idx] = { ...db.brands[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated brand: ${db.brands[idx].name}`, 'brands', id);
+  res.json({ success: true, brand: db.brands[idx] });
+});
+
+app.put('/api/brands/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const b = db.brands?.find((br: any) => br.id === id);
+  if (!b) return res.status(404).json({ error: 'Brand not found' });
+
+  b.status = 'archived';
+  persistDb();
+  logServerAudit(`Archived brand: ${b.name}`, 'brands', id);
+  res.json({ success: true, brand: b });
+});
+
+app.put('/api/brands/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const b = db.brands?.find((br: any) => br.id === id);
+  if (!b) return res.status(404).json({ error: 'Brand not found' });
+
+  b.status = 'active';
+  persistDb();
+  logServerAudit(`Restored brand: ${b.name}`, 'brands', id);
+  res.json({ success: true, brand: b });
+});
+
+app.delete('/api/brands/:id', (req, res) => {
+  const { id } = req.params;
+  const b = db.brands?.find((br: any) => br.id === id);
+  if (!b) return res.status(404).json({ error: 'Brand not found' });
+
+  const linkedProducts = db.products?.filter((p: any) => p.brandId === id) || [];
+  if (linkedProducts.length > 0) {
+    return res.status(400).json({
+      error: `Cannot delete brand '${b.name}'. ${linkedProducts.length} product(s) are assigned to this brand. Please archive the brand or reassign those products first.`,
+      canArchive: true,
+      linkedProductCount: linkedProducts.length,
+    });
+  }
+
+  db.brands = db.brands.filter((br: any) => br.id !== id);
+  persistDb();
+  logServerAudit(`Deleted brand permanently: ${b.name}`, 'brands', id);
+  res.json({ success: true, message: 'Brand deleted permanently' });
+});
+
+// --- 14.6 CATEGORIES & NESTING (CRUD, ARCHIVE, RESTORE, SAFE DELETE) ---
+app.get('/api/categories', (req, res) => {
+  res.json({ success: true, data: db.categories || [], total: db.categories?.length || 0 });
+});
+
+app.post('/api/categories', (req, res) => {
+  const catData = req.body;
+  const newCat = {
+    ...catData,
+    id: catData.id || `cat-${Date.now()}`,
+    slug: catData.slug || catData.name.toLowerCase().replace(/\s+/g, '-'),
+    status: catData.status || 'active',
+    order: catData.order || (db.categories?.length || 0) + 1,
+  };
+
+  if (!db.categories) db.categories = [];
+  db.categories.push(newCat);
+  persistDb();
+  logServerAudit(`Created category: ${newCat.name}`, 'categories', newCat.id);
+  res.status(201).json({ success: true, category: newCat });
+});
+
+app.put('/api/categories/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.categories?.findIndex((c: any) => c.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Category not found' });
+
+  db.categories[idx] = { ...db.categories[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated category: ${db.categories[idx].name}`, 'categories', id);
+  res.json({ success: true, category: db.categories[idx] });
+});
+
+app.put('/api/categories/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const cat = db.categories?.find((c: any) => c.id === id);
+  if (!cat) return res.status(404).json({ error: 'Category not found' });
+
+  cat.status = 'archived';
+  persistDb();
+  logServerAudit(`Archived category: ${cat.name}`, 'categories', id);
+  res.json({ success: true, category: cat });
+});
+
+app.put('/api/categories/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const cat = db.categories?.find((c: any) => c.id === id);
+  if (!cat) return res.status(404).json({ error: 'Category not found' });
+
+  cat.status = 'active';
+  persistDb();
+  logServerAudit(`Restored category: ${cat.name}`, 'categories', id);
+  res.json({ success: true, category: cat });
+});
+
+app.delete('/api/categories/:id', (req, res) => {
+  const { id } = req.params;
+  const { moveToCategoryId } = req.query;
+  const cat = db.categories?.find((c: any) => c.id === id);
+  if (!cat) return res.status(404).json({ error: 'Category not found' });
+
+  const linkedProducts = db.products?.filter((p: any) => p.categoryId === id || p.subcategoryId === id) || [];
+  const childCategories = db.categories?.filter((c: any) => c.parentId === id) || [];
+
+  if (moveToCategoryId && typeof moveToCategoryId === 'string') {
+    // Reassign products to the target category
+    linkedProducts.forEach((p: any) => {
+      if (p.categoryId === id) p.categoryId = moveToCategoryId;
+      if (p.subcategoryId === id) p.subcategoryId = undefined;
+    });
+    // Reassign child categories to root or target
+    childCategories.forEach((cc: any) => {
+      cc.parentId = null;
+    });
+  } else if (linkedProducts.length > 0 || childCategories.length > 0) {
+    return res.status(400).json({
+      error: `Cannot delete category '${cat.name}'. ${linkedProducts.length} product(s) and ${childCategories.length} subcategory(ies) depend on it. Choose another category to move products to, or archive this category.`,
+      canArchive: true,
+      linkedProductCount: linkedProducts.length,
+      childCategoryCount: childCategories.length,
+    });
+  }
+
+  db.categories = db.categories.filter((c: any) => c.id !== id);
+  persistDb();
+  logServerAudit(`Deleted category: ${cat.name}`, 'categories', id);
+  res.json({ success: true, message: 'Category deleted successfully' });
+});
+
+// --- 14.7 UNITS OF MEASURE ---
+app.get('/api/units', (req, res) => {
+  res.json({ success: true, data: db.units || [], total: db.units?.length || 0 });
+});
+
+app.post('/api/units', (req, res) => {
+  const uData = req.body;
+  const newUnit = {
+    ...uData,
+    id: uData.id || `u-${uData.code || Date.now()}`,
+    status: uData.status || 'active',
+  };
+
+  if (!db.units) db.units = [];
+  db.units.push(newUnit);
+  persistDb();
+  logServerAudit(`Created unit of measure: ${newUnit.name} (${newUnit.symbol})`, 'units', newUnit.id);
+  res.status(201).json({ success: true, unit: newUnit });
+});
+
+app.put('/api/units/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.units?.findIndex((u: any) => u.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Unit not found' });
+
+  db.units[idx] = { ...db.units[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated unit: ${db.units[idx].name}`, 'units', id);
+  res.json({ success: true, unit: db.units[idx] });
+});
+
+app.put('/api/units/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const u = db.units?.find((un: any) => un.id === id);
+  if (!u) return res.status(404).json({ error: 'Unit not found' });
+
+  u.status = 'archived';
+  persistDb();
+  logServerAudit(`Archived unit: ${u.name}`, 'units', id);
+  res.json({ success: true, unit: u });
+});
+
+app.put('/api/units/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const u = db.units?.find((un: any) => un.id === id);
+  if (!u) return res.status(404).json({ error: 'Unit not found' });
+
+  u.status = 'active';
+  persistDb();
+  logServerAudit(`Restored unit: ${u.name}`, 'units', id);
+  res.json({ success: true, unit: u });
+});
+
+app.delete('/api/units/:id', (req, res) => {
+  const { id } = req.params;
+  const u = db.units?.find((un: any) => un.id === id);
+  if (!u) return res.status(404).json({ error: 'Unit not found' });
+
+  const linkedProducts = db.products?.filter(
+    (p: any) => p.unit?.toLowerCase() === u.code?.toLowerCase() || p.unit?.toLowerCase() === u.symbol?.toLowerCase()
+  ) || [];
+
+  if (linkedProducts.length > 0) {
+    return res.status(400).json({
+      error: `Cannot delete unit '${u.name}'. It is used by ${linkedProducts.length} product(s). Please archive it instead.`,
+      canArchive: true,
+    });
+  }
+
+  db.units = db.units.filter((un: any) => un.id !== id);
+  persistDb();
+  logServerAudit(`Deleted unit permanently: ${u.name}`, 'units', id);
+  res.json({ success: true, message: 'Unit deleted permanently' });
+});
+
+// --- 14.8 PRODUCT ATTRIBUTES ---
+app.get('/api/attributes', (req, res) => {
+  res.json({ success: true, data: db.attributes || [], total: db.attributes?.length || 0 });
+});
+
+app.post('/api/attributes', (req, res) => {
+  const attrData = req.body;
+  const newAttr = {
+    ...attrData,
+    id: attrData.id || `attr-${attrData.code || Date.now()}`,
+    status: attrData.status || 'active',
+  };
+
+  if (!db.attributes) db.attributes = [];
+  db.attributes.push(newAttr);
+  persistDb();
+  logServerAudit(`Created attribute: ${newAttr.name}`, 'attributes', newAttr.id);
+  res.status(201).json({ success: true, attribute: newAttr });
+});
+
+app.put('/api/attributes/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.attributes?.findIndex((a: any) => a.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Attribute not found' });
+
+  db.attributes[idx] = { ...db.attributes[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated attribute: ${db.attributes[idx].name}`, 'attributes', id);
+  res.json({ success: true, attribute: db.attributes[idx] });
+});
+
+app.put('/api/attributes/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const a = db.attributes?.find((at: any) => at.id === id);
+  if (!a) return res.status(404).json({ error: 'Attribute not found' });
+
+  a.status = 'archived';
+  persistDb();
+  logServerAudit(`Archived attribute: ${a.name}`, 'attributes', id);
+  res.json({ success: true, attribute: a });
+});
+
+app.put('/api/attributes/:id/restore', (req, res) => {
+  const { id } = req.params;
+  const a = db.attributes?.find((at: any) => at.id === id);
+  if (!a) return res.status(404).json({ error: 'Attribute not found' });
+
+  a.status = 'active';
+  persistDb();
+  logServerAudit(`Restored attribute: ${a.name}`, 'attributes', id);
+  res.json({ success: true, attribute: a });
+});
+
+app.delete('/api/attributes/:id', (req, res) => {
+  const { id } = req.params;
+  const a = db.attributes?.find((at: any) => at.id === id);
+  if (!a) return res.status(404).json({ error: 'Attribute not found' });
+
+  db.attributes = db.attributes.filter((at: any) => at.id !== id);
+  persistDb();
+  logServerAudit(`Deleted attribute: ${a.name}`, 'attributes', id);
+  res.json({ success: true, message: 'Attribute deleted successfully' });
+});
+
+// --- 14.9 CUSTOM FIELDS ---
+app.get('/api/custom-fields', (req, res) => {
+  res.json({ success: true, data: db.customFields || [], total: db.customFields?.length || 0 });
+});
+
+app.post('/api/custom-fields', (req, res) => {
+  const cf = {
+    ...req.body,
+    id: req.body.id || `cf-${Date.now()}`,
+    status: req.body.status || 'active',
+  };
+
+  if (!db.customFields) db.customFields = [];
+  db.customFields.push(cf);
+  persistDb();
+  logServerAudit(`Created custom field: ${cf.name} for ${cf.entity}`, 'custom_fields', cf.id);
+  res.status(201).json({ success: true, customField: cf });
+});
+
+app.put('/api/custom-fields/:id', (req, res) => {
+  const { id } = req.params;
+  const idx = db.customFields?.findIndex((c: any) => c.id === id) ?? -1;
+  if (idx === -1) return res.status(404).json({ error: 'Custom field not found' });
+
+  db.customFields[idx] = { ...db.customFields[idx], ...req.body };
+  persistDb();
+  logServerAudit(`Updated custom field: ${db.customFields[idx].name}`, 'custom_fields', id);
+  res.json({ success: true, customField: db.customFields[idx] });
+});
+
+app.delete('/api/custom-fields/:id', (req, res) => {
+  const { id } = req.params;
+  const cf = db.customFields?.find((c: any) => c.id === id);
+  if (!cf) return res.status(404).json({ error: 'Custom field not found' });
+
+  db.customFields = db.customFields.filter((c: any) => c.id !== id);
+  persistDb();
+  logServerAudit(`Deleted custom field: ${cf.name}`, 'custom_fields', id);
+  res.json({ success: true, message: 'Custom field deleted successfully' });
+});
+
+// --- 14.10 UNIVERSAL MASTER DATA EXPORT & IMPORT ---
+app.get('/api/master-data/export', (req, res) => {
+  res.json({
+    version: '4.5.0-universal-erp',
+    exportedAt: new Date().toISOString(),
+    businessType: db.businessType,
+    businessProfile: db.businessProfile,
+    branches: db.branches || [],
+    warehouses: db.warehouses || [],
+    brands: db.brands || [],
+    categories: db.categories || [],
+    units: db.units || [],
+    attributes: db.attributes || [],
+    customFields: db.customFields || [],
+    businessTemplates: db.businessTemplates || [],
+  });
+});
+
+app.post('/api/master-data/import', (req, res) => {
+  const { data, mode = 'merge' } = req.body;
+  if (!data) return res.status(400).json({ error: 'Master data payload is required' });
+
+  if (mode === 'replace') {
+    if (data.businessProfile) db.businessProfile = data.businessProfile;
+    if (data.businessType) db.businessType = data.businessType;
+    if (data.branches) db.branches = data.branches;
+    if (data.brands) db.brands = data.brands;
+    if (data.categories) db.categories = data.categories;
+    if (data.units) db.units = data.units;
+    if (data.attributes) db.attributes = data.attributes;
+    if (data.customFields) db.customFields = data.customFields;
+  } else {
+    // Merge mode
+    if (data.businessProfile) db.businessProfile = { ...db.businessProfile, ...data.businessProfile };
+    if (data.businessType) db.businessType = data.businessType;
+
+    const mergeArrays = (targetArr: any[], sourceArr: any[], key = 'id') => {
+      if (!Array.isArray(sourceArr)) return targetArr;
+      const map = new Map(targetArr.map((item) => [item[key], item]));
+      sourceArr.forEach((item) => {
+        map.set(item[key], { ...(map.get(item[key]) || {}), ...item });
+      });
+      return Array.from(map.values());
+    };
+
+    if (data.branches) db.branches = mergeArrays(db.branches || [], data.branches);
+    if (data.brands) db.brands = mergeArrays(db.brands || [], data.brands);
+    if (data.categories) db.categories = mergeArrays(db.categories || [], data.categories);
+    if (data.units) db.units = mergeArrays(db.units || [], data.units);
+    if (data.attributes) db.attributes = mergeArrays(db.attributes || [], data.attributes);
+    if (data.customFields) db.customFields = mergeArrays(db.customFields || [], data.customFields);
+  }
+
+  persistDb();
+  logServerAudit(`Imported master configuration data (mode: ${mode})`, 'settings', 'master-import');
+  res.json({ success: true, message: 'Master data imported successfully' });
 });
 
 // Website ↔ ERP Sync Handshake

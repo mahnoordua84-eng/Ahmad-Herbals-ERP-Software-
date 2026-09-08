@@ -79,10 +79,92 @@ import {
   initialFeeConfigs,
   initialReservations,
 } from '../data/seedData';
+import {
+  BusinessProfile,
+  BusinessTypeId,
+  Branch,
+  UnitOfMeasure,
+  ProductAttribute,
+  CustomField,
+  BusinessTemplate,
+} from '../types/businessConfig';
+import {
+  initialBusinessProfile,
+  initialBranches,
+  initialUnitsOfMeasure,
+  initialProductAttributes,
+  initialCustomFields,
+} from '../data/seedMasterData';
+import { UNIVERSAL_BUSINESS_TEMPLATES } from '../data/businessTemplates';
 import { ConnectorFactory } from '../connectors';
 import { Language, getTranslation } from './i18n';
 
 interface ERPContextType {
+  // Universal Multi-Business Configuration State
+  businessProfile: BusinessProfile;
+  businessType: BusinessTypeId;
+  branches: Branch[];
+  activeBranchId: string;
+  setActiveBranchId: (id: string) => void;
+  units: UnitOfMeasure[];
+  attributes: ProductAttribute[];
+  customFields: CustomField[];
+  businessTemplates: BusinessTemplate[];
+
+  updateBusinessProfile: (newProfile: Partial<BusinessProfile>) => Promise<void>;
+  switchBusinessType: (
+    newType: BusinessTypeId,
+    options?: { mergeCategories?: boolean; mergeAttributes?: boolean; mergeUnits?: boolean }
+  ) => Promise<{ success: boolean; message: string }>;
+
+  // Branches Management
+  addBranch: (branch: Omit<Branch, 'id'>) => Promise<void>;
+  updateBranch: (id: string, branch: Partial<Branch>) => Promise<void>;
+  archiveBranch: (id: string) => Promise<void>;
+  restoreBranch: (id: string) => Promise<void>;
+  deleteBranch: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Archive & Safe Delete Enhancements
+  archiveWarehouse: (id: string) => Promise<void>;
+  restoreWarehouse: (id: string) => Promise<void>;
+  safeDeleteWarehouse: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  archiveBrand: (id: string) => Promise<void>;
+  restoreBrand: (id: string) => Promise<void>;
+  safeDeleteBrand: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  archiveCategory: (id: string) => Promise<void>;
+  restoreCategory: (id: string) => Promise<void>;
+  safeDeleteCategory: (id: string, moveToCategoryId?: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Units of Measure
+  addUnit: (unit: Omit<UnitOfMeasure, 'id'>) => Promise<void>;
+  updateUnit: (id: string, unit: Partial<UnitOfMeasure>) => Promise<void>;
+  archiveUnit: (id: string) => Promise<void>;
+  restoreUnit: (id: string) => Promise<void>;
+  deleteUnit: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Product Attributes
+  addAttribute: (attr: Omit<ProductAttribute, 'id'>) => Promise<void>;
+  updateAttribute: (id: string, attr: Partial<ProductAttribute>) => Promise<void>;
+  archiveAttribute: (id: string) => Promise<void>;
+  restoreAttribute: (id: string) => Promise<void>;
+  deleteAttribute: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Custom Fields
+  addCustomField: (field: Omit<CustomField, 'id'>) => Promise<void>;
+  updateCustomField: (id: string, field: Partial<CustomField>) => Promise<void>;
+  deleteCustomField: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Template Management & Clone
+  createCustomTemplate: (tpl: Partial<BusinessTemplate>) => Promise<void>;
+  cloneBusinessTemplate: (sourceId: string, newName?: string) => Promise<void>;
+  deleteBusinessTemplate: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Master Data Import & Export
+  exportMasterData: () => Promise<any>;
+  importMasterData: (data: any, mode?: 'merge' | 'replace') => Promise<{ success: boolean; message: string }>;
+
   // State
   brandSettings: BrandSettings;
   generalSettings: GeneralSettings;
@@ -299,6 +381,47 @@ interface ERPContextType {
 const ERPContext = createContext<ERPContextType | undefined>(undefined);
 
 export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Universal Multi-Business Configuration State
+  const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(() => {
+    const saved = localStorage.getItem('ah_erp_business_profile');
+    return saved ? JSON.parse(saved) : initialBusinessProfile;
+  });
+
+  const [businessType, setBusinessType] = useState<BusinessTypeId>(() => {
+    const saved = localStorage.getItem('ah_erp_business_type');
+    return (saved as BusinessTypeId) || 'auto_parts';
+  });
+
+  const [branches, setBranches] = useState<Branch[]>(() => {
+    const saved = localStorage.getItem('ah_erp_branches');
+    return saved ? JSON.parse(saved) : initialBranches;
+  });
+
+  const [activeBranchId, setActiveBranchId] = useState<string>(() => {
+    const saved = localStorage.getItem('ah_erp_active_branch_id');
+    return saved || 'br-hq';
+  });
+
+  const [units, setUnits] = useState<UnitOfMeasure[]>(() => {
+    const saved = localStorage.getItem('ah_erp_units');
+    return saved ? JSON.parse(saved) : initialUnitsOfMeasure;
+  });
+
+  const [attributes, setAttributes] = useState<ProductAttribute[]>(() => {
+    const saved = localStorage.getItem('ah_erp_attributes');
+    return saved ? JSON.parse(saved) : initialProductAttributes;
+  });
+
+  const [customFields, setCustomFields] = useState<CustomField[]>(() => {
+    const saved = localStorage.getItem('ah_erp_custom_fields');
+    return saved ? JSON.parse(saved) : initialCustomFields;
+  });
+
+  const [businessTemplates, setBusinessTemplates] = useState<BusinessTemplate[]>(() => {
+    const saved = localStorage.getItem('ah_erp_business_templates');
+    return saved ? JSON.parse(saved) : UNIVERSAL_BUSINESS_TEMPLATES;
+  });
+
   // Load state from localStorage or fallback to seeds
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(() => {
     const saved = localStorage.getItem('ah_erp_brand_settings');
@@ -604,6 +727,84 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [brandSettings.primaryColor, brandSettings.secondaryColor, brandSettings.accentColor, brandSettings.sidebarColor]);
 
   // Auto-persist updates
+  useEffect(() => {
+    localStorage.setItem('ah_erp_business_profile', JSON.stringify(businessProfile));
+  }, [businessProfile]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_business_type', businessType);
+  }, [businessType]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_branches', JSON.stringify(branches));
+  }, [branches]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_active_branch_id', activeBranchId);
+  }, [activeBranchId]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_units', JSON.stringify(units));
+  }, [units]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_attributes', JSON.stringify(attributes));
+  }, [attributes]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_custom_fields', JSON.stringify(customFields));
+  }, [customFields]);
+
+  useEffect(() => {
+    localStorage.setItem('ah_erp_business_templates', JSON.stringify(businessTemplates));
+  }, [businessTemplates]);
+
+  // Initial fetch to sync server master data with client
+  useEffect(() => {
+    fetch('/api/business/profile')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.profile) setBusinessProfile(d.profile);
+        if (d.businessType) setBusinessType(d.businessType);
+      })
+      .catch(() => {});
+
+    fetch('/api/branches')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data && Array.isArray(d.data) && d.data.length > 0) setBranches(d.data);
+      })
+      .catch(() => {});
+
+    fetch('/api/units')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data && Array.isArray(d.data) && d.data.length > 0) setUnits(d.data);
+      })
+      .catch(() => {});
+
+    fetch('/api/attributes')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data && Array.isArray(d.data) && d.data.length > 0) setAttributes(d.data);
+      })
+      .catch(() => {});
+
+    fetch('/api/custom-fields')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data && Array.isArray(d.data) && d.data.length > 0) setCustomFields(d.data);
+      })
+      .catch(() => {});
+
+    fetch('/api/business/templates')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data && Array.isArray(d.data) && d.data.length > 0) setBusinessTemplates(d.data);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('ah_erp_brand_settings', JSON.stringify(brandSettings));
   }, [brandSettings]);
@@ -1727,7 +1928,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
   };
 
-  // Categories CRUD
+  // Categories CRUD & Safe Deletion
   const addCategory = (cData: Omit<Category, 'id'>) => {
     const newCat: Category = {
       ...cData,
@@ -1735,6 +1936,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setCategories((prev) => [...prev, newCat]);
     logAudit(`Category Created: ${newCat.name}`, 'categories', newCat.id);
+    fetch('/api/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newCat),
+    }).catch(() => {});
   };
 
   const updateCategory = (id: string, cData: Partial<Category>) => {
@@ -1742,14 +1948,63 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       prev.map((c) => (c.id === id ? { ...c, ...cData } : c))
     );
     logAudit(`Category Updated: ${id}`, 'categories', id);
+    fetch(`/api/categories/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cData),
+    }).catch(() => {});
+  };
+
+  const archiveCategory = async (id: string) => {
+    setCategories((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status: 'ARCHIVED' as any } : c))
+    );
+    logAudit(`Category Archived: ${id}`, 'categories', id);
+    fetch(`/api/categories/${id}/archive`, { method: 'POST' }).catch(() => {});
+  };
+
+  const restoreCategory = async (id: string) => {
+    setCategories((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status: 'ACTIVE' as any } : c))
+    );
+    logAudit(`Category Restored: ${id}`, 'categories', id);
+    fetch(`/api/categories/${id}/restore`, { method: 'POST' }).catch(() => {});
+  };
+
+  const safeDeleteCategory = async (id: string, moveToCategoryId?: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/categories/${id}${moveToCategoryId ? `?moveToCategoryId=${moveToCategoryId}` : ''}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete category with dependent records' };
+      }
+      setCategories((prev) => prev.filter((c) => c.id !== id && c.parentId !== id));
+      if (moveToCategoryId) {
+        setProducts((prev) => prev.map((p) => (p.category === id ? { ...p, category: moveToCategoryId } : p)));
+      }
+      logAudit(`Category Deleted safely: ${id}`, 'categories', id);
+      return { success: true };
+    } catch {
+      // Local check
+      const linked = products.some((p) => p.category === id);
+      if (linked && !moveToCategoryId) {
+        return { success: false, error: 'Cannot delete category: products are assigned to it. Reassign products or archive category.' };
+      }
+      setCategories((prev) => prev.filter((c) => c.id !== id && c.parentId !== id));
+      if (moveToCategoryId) {
+        setProducts((prev) => prev.map((p) => (p.category === id ? { ...p, category: moveToCategoryId } : p)));
+      }
+      return { success: true };
+    }
   };
 
   const deleteCategory = (id: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== id && c.parentId !== id));
-    logAudit(`Category Deleted: ${id}`, 'categories', id);
+    safeDeleteCategory(id);
   };
 
-  // Brands CRUD
+  // Brands CRUD & Safe Deletion
   const addBrand = (bData: Omit<Brand, 'id' | 'createdAt'>) => {
     const newB: Brand = {
       ...bData,
@@ -1758,6 +2013,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setBrands((prev) => [...prev, newB]);
     logAudit(`Brand Created: ${newB.name}`, 'brands', newB.id);
+    fetch('/api/brands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newB),
+    }).catch(() => {});
   };
 
   const updateBrand = (id: string, bData: Partial<Brand>) => {
@@ -1765,14 +2025,54 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       prev.map((b) => (b.id === id ? { ...b, ...bData } : b))
     );
     logAudit(`Brand Updated: ${id}`, 'brands', id);
+    fetch(`/api/brands/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bData),
+    }).catch(() => {});
+  };
+
+  const archiveBrand = async (id: string) => {
+    setBrands((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status: 'ARCHIVED' as any } : b))
+    );
+    logAudit(`Brand Archived: ${id}`, 'brands', id);
+    fetch(`/api/brands/${id}/archive`, { method: 'POST' }).catch(() => {});
+  };
+
+  const restoreBrand = async (id: string) => {
+    setBrands((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status: 'ACTIVE' as any } : b))
+    );
+    logAudit(`Brand Restored: ${id}`, 'brands', id);
+    fetch(`/api/brands/${id}/restore`, { method: 'POST' }).catch(() => {});
+  };
+
+  const safeDeleteBrand = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/brands/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete brand with dependent records' };
+      }
+      setBrands((prev) => prev.filter((b) => b.id !== id));
+      logAudit(`Brand Deleted: ${id}`, 'brands', id);
+      return { success: true };
+    } catch {
+      const linked = products.some((p) => p.brandId === id);
+      if (linked) {
+        return { success: false, error: 'Cannot delete brand: active products are associated with it. Please archive instead.' };
+      }
+      setBrands((prev) => prev.filter((b) => b.id !== id));
+      return { success: true };
+    }
   };
 
   const deleteBrand = (id: string) => {
-    setBrands((prev) => prev.filter((b) => b.id !== id));
-    logAudit(`Brand Deleted: ${id}`, 'brands', id);
+    safeDeleteBrand(id);
   };
 
-  // Warehouses CRUD
+  // Warehouses CRUD & Safe Deletion
   const addWarehouse = (whData: Omit<Warehouse, 'id'>) => {
     const newW: Warehouse = {
       ...whData,
@@ -1780,6 +2080,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setWarehouses((prev) => [...prev, newW]);
     logAudit(`Warehouse Added: ${newW.name}`, 'warehouses', newW.id);
+    fetch('/api/warehouses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newW),
+    }).catch(() => {});
   };
 
   const updateWarehouse = (id: string, whData: Partial<Warehouse>) => {
@@ -1787,11 +2092,447 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       prev.map((w) => (w.id === id ? { ...w, ...whData } : w))
     );
     logAudit(`Warehouse Updated: ${id}`, 'warehouses', id);
+    fetch(`/api/warehouses/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(whData),
+    }).catch(() => {});
+  };
+
+  const archiveWarehouse = async (id: string) => {
+    setWarehouses((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, status: 'ARCHIVED' as any } : w))
+    );
+    logAudit(`Warehouse Archived: ${id}`, 'warehouses', id);
+    fetch(`/api/warehouses/${id}/archive`, { method: 'POST' }).catch(() => {});
+  };
+
+  const restoreWarehouse = async (id: string) => {
+    setWarehouses((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, status: 'ACTIVE' as any } : w))
+    );
+    logAudit(`Warehouse Restored: ${id}`, 'warehouses', id);
+    fetch(`/api/warehouses/${id}/restore`, { method: 'POST' }).catch(() => {});
+  };
+
+  const safeDeleteWarehouse = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/warehouses/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete warehouse with physical inventory' };
+      }
+      setWarehouses((prev) => prev.filter((w) => w.id !== id));
+      logAudit(`Warehouse Deleted: ${id}`, 'warehouses', id);
+      return { success: true };
+    } catch {
+      const hasStock = warehouseInventory.some((wi) => wi.warehouseId === id && wi.physicalStock > 0);
+      if (hasStock) {
+        return { success: false, error: 'Cannot delete warehouse: physical inventory exists in this warehouse. Please transfer stock or archive.' };
+      }
+      setWarehouses((prev) => prev.filter((w) => w.id !== id));
+      return { success: true };
+    }
   };
 
   const deleteWarehouse = (id: string) => {
-    setWarehouses((prev) => prev.filter((w) => w.id !== id));
-    logAudit(`Warehouse Deleted: ${id}`, 'warehouses', id);
+    safeDeleteWarehouse(id);
+  };
+
+  // Branches Management
+  const addBranch = async (branchData: Omit<Branch, 'id'>) => {
+    const newBranch: Branch = {
+      ...branchData,
+      id: `br-${Date.now()}`,
+      status: branchData.status || 'active',
+      openingDate: branchData.openingDate || new Date().toISOString().split('T')[0],
+    };
+    setBranches((prev) => [...prev, newBranch]);
+    logAudit(`Branch Created: ${newBranch.name}`, 'settings', newBranch.id);
+    fetch('/api/branches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newBranch),
+    }).catch(() => {});
+  };
+
+  const updateBranch = async (id: string, branchData: Partial<Branch>) => {
+    setBranches((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, ...branchData } : b))
+    );
+    logAudit(`Branch Updated: ${id}`, 'settings', id);
+    fetch(`/api/branches/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(branchData),
+    }).catch(() => {});
+  };
+
+  const archiveBranch = async (id: string) => {
+    setBranches((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status: 'archived' } : b))
+    );
+    logAudit(`Branch Archived: ${id}`, 'settings', id);
+    fetch(`/api/branches/${id}/archive`, { method: 'POST' }).catch(() => {});
+  };
+
+  const restoreBranch = async (id: string) => {
+    setBranches((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status: 'active' } : b))
+    );
+    logAudit(`Branch Restored: ${id}`, 'settings', id);
+    fetch(`/api/branches/${id}/restore`, { method: 'POST' }).catch(() => {});
+  };
+
+  const deleteBranch = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/branches/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete branch with active dependencies' };
+      }
+      setBranches((prev) => prev.filter((b) => b.id !== id));
+      logAudit(`Branch Deleted: ${id}`, 'settings', id);
+      return { success: true };
+    } catch {
+      const hasWarehouses = warehouses.some((w) => w.branchId === id);
+      if (hasWarehouses) {
+        return { success: false, error: 'Cannot delete branch: linked warehouses exist. Please reassign or archive.' };
+      }
+      setBranches((prev) => prev.filter((b) => b.id !== id));
+      return { success: true };
+    }
+  };
+
+  // Units of Measure CRUD
+  const addUnit = async (uData: Omit<UnitOfMeasure, 'id'>) => {
+    const newUnit: UnitOfMeasure = {
+      ...uData,
+      id: `u-${Date.now()}`,
+      status: uData.status || 'active',
+    };
+    setUnits((prev) => [...prev, newUnit]);
+    logAudit(`Unit Created: ${newUnit.name} (${newUnit.symbol})`, 'settings', newUnit.id);
+    fetch('/api/units', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newUnit),
+    }).catch(() => {});
+  };
+
+  const updateUnit = async (id: string, uData: Partial<UnitOfMeasure>) => {
+    setUnits((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, ...uData } : u))
+    );
+    logAudit(`Unit Updated: ${id}`, 'settings', id);
+    fetch(`/api/units/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(uData),
+    }).catch(() => {});
+  };
+
+  const archiveUnit = async (id: string) => {
+    setUnits((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, status: 'archived' } : u))
+    );
+    logAudit(`Unit Archived: ${id}`, 'settings', id);
+    fetch(`/api/units/${id}/archive`, { method: 'POST' }).catch(() => {});
+  };
+
+  const restoreUnit = async (id: string) => {
+    setUnits((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, status: 'active' } : u))
+    );
+    logAudit(`Unit Restored: ${id}`, 'settings', id);
+    fetch(`/api/units/${id}/restore`, { method: 'POST' }).catch(() => {});
+  };
+
+  const deleteUnit = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/units/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete unit' };
+      }
+      setUnits((prev) => prev.filter((u) => u.id !== id));
+      logAudit(`Unit Deleted: ${id}`, 'settings', id);
+      return { success: true };
+    } catch {
+      setUnits((prev) => prev.filter((u) => u.id !== id));
+      return { success: true };
+    }
+  };
+
+  // Product Attributes CRUD
+  const addAttribute = async (aData: Omit<ProductAttribute, 'id'>) => {
+    const newAttr: ProductAttribute = {
+      ...aData,
+      id: `attr-${Date.now()}`,
+      status: aData.status || 'active',
+    };
+    setAttributes((prev) => [...prev, newAttr]);
+    logAudit(`Attribute Created: ${newAttr.name}`, 'settings', newAttr.id);
+    fetch('/api/attributes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newAttr),
+    }).catch(() => {});
+  };
+
+  const updateAttribute = async (id: string, aData: Partial<ProductAttribute>) => {
+    setAttributes((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, ...aData } : a))
+    );
+    logAudit(`Attribute Updated: ${id}`, 'settings', id);
+    fetch(`/api/attributes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(aData),
+    }).catch(() => {});
+  };
+
+  const archiveAttribute = async (id: string) => {
+    setAttributes((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'archived' } : a))
+    );
+    logAudit(`Attribute Archived: ${id}`, 'settings', id);
+    fetch(`/api/attributes/${id}/archive`, { method: 'POST' }).catch(() => {});
+  };
+
+  const restoreAttribute = async (id: string) => {
+    setAttributes((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'active' } : a))
+    );
+    logAudit(`Attribute Restored: ${id}`, 'settings', id);
+    fetch(`/api/attributes/${id}/restore`, { method: 'POST' }).catch(() => {});
+  };
+
+  const deleteAttribute = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/attributes/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete attribute' };
+      }
+      setAttributes((prev) => prev.filter((a) => a.id !== id));
+      logAudit(`Attribute Deleted: ${id}`, 'settings', id);
+      return { success: true };
+    } catch {
+      setAttributes((prev) => prev.filter((a) => a.id !== id));
+      return { success: true };
+    }
+  };
+
+  // Custom Fields CRUD
+  const addCustomField = async (fData: Omit<CustomField, 'id'>) => {
+    const newF: CustomField = {
+      ...fData,
+      id: `cf-${Date.now()}`,
+      status: fData.status || 'active',
+    };
+    setCustomFields((prev) => [...prev, newF]);
+    logAudit(`Custom Field Created: ${newF.name}`, 'settings', newF.id);
+    fetch('/api/custom-fields', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newF),
+    }).catch(() => {});
+  };
+
+  const updateCustomField = async (id: string, fData: Partial<CustomField>) => {
+    setCustomFields((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, ...fData } : f))
+    );
+    logAudit(`Custom Field Updated: ${id}`, 'settings', id);
+    fetch(`/api/custom-fields/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fData),
+    }).catch(() => {});
+  };
+
+  const deleteCustomField = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`/api/custom-fields/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Cannot delete custom field' };
+      }
+      setCustomFields((prev) => prev.filter((f) => f.id !== id));
+      logAudit(`Custom Field Deleted: ${id}`, 'settings', id);
+      return { success: true };
+    } catch {
+      setCustomFields((prev) => prev.filter((f) => f.id !== id));
+      return { success: true };
+    }
+  };
+
+  // Business Profile & Template Switcher
+  const updateBusinessProfile = async (newProfile: Partial<BusinessProfile>) => {
+    setBusinessProfile((prev) => ({ ...prev, ...newProfile }));
+    if (newProfile.businessName) {
+      setBrandSettings((prev) => ({ ...prev, businessName: newProfile.businessName || prev.businessName }));
+    }
+    if (newProfile.phone) {
+      setBrandSettings((prev) => ({ ...prev, phone: newProfile.phone || prev.phone }));
+    }
+    if (newProfile.email) {
+      setBrandSettings((prev) => ({ ...prev, email: newProfile.email || prev.email }));
+    }
+    if (newProfile.currencySymbol) {
+      setBrandSettings((prev) => ({ ...prev, currencySymbol: newProfile.currencySymbol || prev.currencySymbol }));
+    }
+    logAudit('Business Profile Updated', 'settings', 'profile');
+    fetch('/api/business/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newProfile),
+    }).catch(() => {});
+  };
+
+  const switchBusinessType = async (
+    newType: BusinessTypeId,
+    options: { mergeCategories?: boolean; mergeAttributes?: boolean; mergeUnits?: boolean } = {
+      mergeCategories: true,
+      mergeAttributes: true,
+      mergeUnits: true,
+    }
+  ): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await fetch('/api/business/switch-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessType: newType, ...options }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, message: data.error || 'Failed to switch business template' };
+      }
+
+      setBusinessType(newType);
+      if (data.profile) setBusinessProfile(data.profile);
+      if (data.categories) setCategories(data.categories);
+      if (data.attributes) setAttributes(data.attributes);
+      if (data.units) setUnits(data.units);
+
+      logAudit(`Business Template Switched to ${newType}`, 'settings', newType);
+      return { success: true, message: data.message || `Switched to ${newType} with zero data loss!` };
+    } catch (e: any) {
+      // Local fallback
+      setBusinessType(newType);
+      const targetTpl = businessTemplates.find((t) => t.id === newType);
+      if (targetTpl) {
+        setBusinessProfile((prev) => ({
+          ...prev,
+          businessType: newType,
+          businessName: prev.businessName || targetTpl.name,
+        }));
+      }
+      return { success: true, message: `Switched active type to ${newType}` };
+    }
+  };
+
+  // Custom Templates & Cloning
+  const createCustomTemplate = async (tpl: Partial<BusinessTemplate>) => {
+    const newTpl: BusinessTemplate = {
+      id: `custom_${Date.now()}`,
+      type: (tpl.type || 'custom') as BusinessTypeId,
+      name: tpl.name || 'Custom Business Template',
+      description: tpl.description || 'Custom tailored business setup',
+      iconName: tpl.iconName || 'Store',
+      badge: tpl.badge || 'Custom',
+      recommendedCategories: tpl.recommendedCategories || [],
+      recommendedAttributes: tpl.recommendedAttributes || [],
+      recommendedUnits: tpl.recommendedUnits || [],
+      recommendedProductFields: tpl.recommendedProductFields || ['sku', 'name', 'price', 'stock'],
+      posDisplayFields: tpl.posDisplayFields || ['name', 'price', 'stock'],
+    };
+    setBusinessTemplates((prev) => [...prev, newTpl]);
+    logAudit(`Custom Business Template Created: ${newTpl.name}`, 'settings', newTpl.id);
+    fetch('/api/business/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTpl),
+    }).catch(() => {});
+  };
+
+  const cloneBusinessTemplate = async (sourceId: string, newName?: string) => {
+    const source = businessTemplates.find((t) => t.id === sourceId);
+    if (!source) return;
+    const cloned: BusinessTemplate = {
+      ...source,
+      id: `clone_${Date.now()}`,
+      name: newName || `${source.name} (Custom Copy)`,
+      badge: 'Custom Clone',
+    };
+    setBusinessTemplates((prev) => [...prev, cloned]);
+    logAudit(`Cloned Template: ${source.name} -> ${cloned.name}`, 'settings', cloned.id);
+    fetch(`/api/business/templates/${sourceId}/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: cloned.name }),
+    }).catch(() => {});
+  };
+
+  const deleteBusinessTemplate = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    if (!id.startsWith('custom_') && !id.startsWith('clone_')) {
+      return { success: false, error: 'System presets cannot be deleted. You can clone and customize them instead.' };
+    }
+    setBusinessTemplates((prev) => prev.filter((t) => t.id !== id));
+    logAudit(`Deleted Custom Template: ${id}`, 'settings', id);
+    fetch(`/api/business/templates/${id}`, { method: 'DELETE' }).catch(() => {});
+    return { success: true };
+  };
+
+  // Master Data Import & Export
+  const exportMasterData = async (): Promise<any> => {
+    try {
+      const res = await fetch('/api/master-data/export');
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
+    return {
+      version: '2.0-universal',
+      exportedAt: new Date().toISOString(),
+      businessProfile,
+      businessType,
+      branches,
+      warehouses,
+      brands,
+      categories,
+      units,
+      attributes,
+      customFields,
+      businessTemplates: businessTemplates.filter((t) => !t.isSystemTemplate),
+    };
+  };
+
+  const importMasterData = async (data: any, mode: 'merge' | 'replace' = 'merge'): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await fetch(`/api/master-data/import?mode=${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        return { success: false, message: resData.error || 'Import failed' };
+      }
+      if (data.businessProfile) setBusinessProfile(data.businessProfile);
+      if (data.businessType) setBusinessType(data.businessType);
+      if (data.branches) setBranches(mode === 'replace' ? data.branches : [...branches, ...data.branches]);
+      if (data.warehouses) setWarehouses(mode === 'replace' ? data.warehouses : [...warehouses, ...data.warehouses]);
+      if (data.brands) setBrands(mode === 'replace' ? data.brands : [...brands, ...data.brands]);
+      if (data.categories) setCategories(mode === 'replace' ? data.categories : [...categories, ...data.categories]);
+      if (data.units) setUnits(mode === 'replace' ? data.units : [...units, ...data.units]);
+      if (data.attributes) setAttributes(mode === 'replace' ? data.attributes : [...attributes, ...data.attributes]);
+      if (data.customFields) setCustomFields(mode === 'replace' ? data.customFields : [...customFields, ...data.customFields]);
+      return { success: true, message: resData.message || 'Master data imported successfully' };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Error processing import file' };
+    }
   };
 
   // Suppliers CRUD
@@ -2436,6 +3177,50 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setActiveBrandId,
         updateBrandSettings,
         updateGeneralSettings,
+        // Universal Multi-Business Master Configuration
+        businessProfile,
+        businessType,
+        branches,
+        activeBranchId,
+        setActiveBranchId,
+        units,
+        attributes,
+        customFields,
+        businessTemplates,
+        updateBusinessProfile,
+        switchBusinessType,
+        addBranch,
+        updateBranch,
+        archiveBranch,
+        restoreBranch,
+        deleteBranch,
+        archiveWarehouse,
+        restoreWarehouse,
+        safeDeleteWarehouse,
+        archiveBrand,
+        restoreBrand,
+        safeDeleteBrand,
+        archiveCategory,
+        restoreCategory,
+        safeDeleteCategory,
+        addUnit,
+        updateUnit,
+        archiveUnit,
+        restoreUnit,
+        deleteUnit,
+        addAttribute,
+        updateAttribute,
+        archiveAttribute,
+        restoreAttribute,
+        deleteAttribute,
+        addCustomField,
+        updateCustomField,
+        deleteCustomField,
+        createCustomTemplate,
+        cloneBusinessTemplate,
+        deleteBusinessTemplate,
+        exportMasterData,
+        importMasterData,
         addBrand,
         updateBrand,
         deleteBrand,

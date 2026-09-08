@@ -148,6 +148,8 @@ export interface GeneralSettings {
   largeExpenseThreshold: number;
 }
 
+export * from './businessConfig';
+
 export interface Brand {
   id: string;
   name: string;
@@ -158,7 +160,7 @@ export interface Brand {
   website: string;
   contactEmail: string;
   contactPhone: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'archived';
   createdAt: string;
 }
 
@@ -168,9 +170,12 @@ export interface Category {
   slug?: string;
   parentId?: string | null; // For unlimited subcategory nesting
   image?: string;
+  icon?: string;
+  businessTypeId?: string;
   description?: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'archived';
   order: number;
+  displayOrder?: number;
   seoTitle?: string;
   seoDescription?: string;
 }
@@ -237,6 +242,12 @@ export interface Product {
   seoTitle?: string;
   seoDescription?: string;
   tags: string[];
+  productType?: 'basic' | 'variable' | 'service' | 'bundle' | 'kit' | 'serialized' | 'batch_expiry';
+  attributes?: Record<string, any>;
+  customFields?: Record<string, any>;
+  branchId?: string;
+  warehouseStock?: Array<{ warehouseId: string; stock: number }>;
+  variants?: Array<any>;
   hasVariations: boolean;
   variations: ProductVariation[];
   reservedStock?: number;
@@ -264,6 +275,7 @@ export interface Warehouse {
   id: string;
   name: string;
   code?: string;
+  branchId?: string;
   type: 'Main Warehouse' | 'Store' | 'Branch' | 'Factory' | 'Distribution Center';
   address: string;
   city: string;
@@ -271,7 +283,9 @@ export interface Warehouse {
   managerPhone?: string;
   manager?: string;
   phone?: string;
-  status: 'active' | 'inactive';
+  contact?: string;
+  capacity?: string;
+  status: 'active' | 'inactive' | 'archived';
   isDefault?: boolean;
 }
 
